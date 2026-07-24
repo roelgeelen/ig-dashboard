@@ -3,8 +3,23 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const ENV_FILE = path.join(__dirname, '..', '.env');
+
+// Scheelt een tweede geheim in .env: is de GitHub CLI al ingelogd, dan lenen we
+// gewoon dat token. Faalt stilletjes als gh ontbreekt of niet is ingelogd.
+function githubTokenFromCli() {
+  try {
+    return execFileSync('gh', ['auth', 'token'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      shell: process.platform === 'win32',
+    }).trim();
+  } catch {
+    return '';
+  }
+}
 
 function load() {
   let fromFile = {};
@@ -26,16 +41,17 @@ function load() {
 
   const cfg = {
     passphrase: process.env.ENCRYPTION_PASSPHRASE || fromFile.ENCRYPTION_PASSPHRASE || '',
-    githubToken: process.env.GITHUB_TOKEN || fromFile.GITHUB_TOKEN || '',
+    githubToken:
+      process.env.GITHUB_TOKEN || fromFile.GITHUB_TOKEN || githubTokenFromCli(),
     intervalDays: Number(process.env.EXPORT_INTERVAL_DAYS || fromFile.EXPORT_INTERVAL_DAYS || 4),
   };
 
   const missing = [];
-  if (!cfg.passphrase) missing.push('ENCRYPTION_PASSPHRASE');
-  if (!cfg.githubToken) missing.push('GITHUB_TOKEN');
+  if (!cfg.passphrase) missing.push('ENCRYPTION_PASSPHRASE (je dashboard-passphrase)');
+  if (!cfg.githubToken) missing.push('GITHUB_TOKEN (of log in met: gh auth login)');
   if (missing.length) {
     throw new Error(
-      `Ontbrekende instellingen: ${missing.join(', ')}. Kopieer agent/.env.example naar agent/.env en vul ze in.`
+      `Ontbrekende instellingen: ${missing.join(', ')}. Draai "node setup.js" om dit in te vullen.`
     );
   }
   if (!Number.isFinite(cfg.intervalDays) || cfg.intervalDays < 4) {
