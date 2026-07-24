@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Instagram Groei Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+  :root { color-scheme: light; --pink:#E1306C; --purple:#833AB4; --blue:#405DE6; --bg:#fafafa; --card:#fff; --border:#e8e8e8; --text:#1c1e21; --muted:#65676b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  header.top { background:linear-gradient(90deg,#405DE6 0%,#833AB4 25%,#C13584 50%,#E1306C 75%,#F77737 100%); padding:26px 24px; color:#fff; }
+  header.top h1 { margin:0 0 4px 0; font-size:20px; }
+  header.top p { margin:0; font-size:12.5px; opacity:.92; }
+  .wrap { max-width:900px; margin:0 auto; padding:20px 16px 60px; }
+  .gate { max-width:420px; margin:80px auto; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:28px; text-align:center; }
+  .gate input { width:100%; padding:12px 14px; font-size:15px; border:1px solid #ccc; border-radius:8px; margin:14px 0; }
+  .gate button, button.primary { background:var(--pink); color:#fff; border:none; border-radius:8px; padding:11px 18px; font-size:14px; font-weight:600; cursor:pointer; width:100%; }
+  .gate .err { color:#d93025; font-size:13px; margin-top:8px; min-height:16px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+  .card .label { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .card .value { font-size:22px; font-weight:700; }
+  .card .delta { font-size:11.5px; margin-top:4px; }
+  .delta.up{color:#1a7f37;} .delta.down{color:#d93025;} .delta.flat{color:var(--muted);}
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:18px; }
+  .panel h2 { font-size:14px; margin:0 0 4px 0; }
+  .panel .sub { font-size:12px; color:var(--muted); margin-bottom:12px; }
+  #app { display:none; }
+  .hidden { display:none !important; }
+  footer { text-align:center; font-size:11px; color:var(--muted); padding:16px 0 30px; }
+  .status-msg { font-size:12.5px; padding:9px 11px; border-radius:8px; margin-top:10px; }
+  .status-msg.success{background:#e6f4ea;color:#1a7f37;} .status-msg.error{background:#fce8e6;color:#d93025;} .status-msg.info{background:#eef2ff;color:#3730a3;}
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate">
+  <h2 style="margin-top:0;">🔒 Instagram Dashboard</h2>
+  <p style="font-size:13px;color:var(--muted);">Voer je passphrase in om je gegevens te ontsleutelen</p>
+  <input type="password" id="passphraseInput" placeholder="Passphrase" autocomplete="off" />
+  <button onclick="unlockDashboard()">Ontgrendelen</button>
+  <div class="err" id="gateErr"></div>
+</div>
+
+<div id="app">
+  <header class="top">
+    <h1>Instagram Groei Dashboard</h1>
+    <p id="headerSubtitle">Laatste update: —</p>
+  </header>
+  <div class="wrap">
+    <div class="cards" id="summaryCards"></div>
+    <div class="panel">
+      <h2>Volgers &amp; volgend over tijd</h2>
+      <div class="sub">Automatisch bijgewerkt, elke ochtend</div>
+      <div style="height:240px;"><canvas id="historyChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Groei per dag</h2>
+      <div class="sub">Netto verandering in volgers t.o.v. de vorige dag</div>
+      <div style="height:200px;"><canvas id="growthChart"></canvas></div>
+    </div>
+  </div>
+  <footer>
+    Cijfers worden dagelijks automatisch opgehaald via de officiële Instagram API. Data is lokaal versleuteld met je passphrase.
+  </footer>
+</div>
+
+<script>
+// ---- crypto helpers (moeten overeenkomen met scripts/crypto-utils.js) ----
+const IG_SALT_STR = 'ig-dashboard-v1-salt';
+const IG_ITER = 100000;
+
+async function igDeriveKey(passphrase) {
+  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(IG_SALT_STR), iterations: IG_ITER, hash: 'SHA-256' },
+    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  );
+}
+function igB64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function igBytesToB64(bytes) {
+  let bin = '';
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin);
+}
+async function igDecrypt(passphrase, b64) {
+  const key = await igDeriveKey(passphrase);
+  const combined = igB64ToBytes(b64);
+  const iv = combined.slice(0, 12);
+  const ciphertextAndTag = combined.slice(12);
+  const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertextAndTag);
+  return JSON.parse(new TextDecoder().decode(plainBuf));
+}
+async function igEncrypt(passphrase, obj) {
+  const key = await igDeriveKey(passphrase);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(obj));
+  const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  const combined = new Uint8Array(iv.length + ctBuf.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(ctBuf), iv.length);
+  return igBytesToB64(combined);
+}
+
+// ---- app state ----
+let PASSPHRASE = null;
+let history = [];
+
+async function unlockDashboard() {
+  const pass = document.getElementById('passphraseInput').value;
+  const errEl = document.getElementById('gateErr');
+  errEl.textContent = '';
+  if (!pass) { errEl.textContent = 'Vul een passphrase in.'; return; }
+  try {
+    const res = await fetch('data/history.enc.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Kon data/history.enc.json niet laden (' + res.status + ')');
+    const blob = await res.json();
+    history = await igDecrypt(pass, blob.data);
+    PASSPHRASE = pass;
+    sessionStorage.setItem('ig_dash_pass', pass);
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    renderAll();
+  } catch (e) {
+    errEl.textContent = 'Onjuiste passphrase of data kon niet worden gelezen.';
+  }
+}
+
+document.getElementById('passphraseInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') unlockDashboard();
+});
+
+// probeer automatisch te ontgrendelen als de passphrase deze sessie al eerder is ingevoerd
+(async function tryAutoUnlock() {
+  const saved = sessionStorage.getItem('ig_dash_pass');
+  if (saved) {
+    document.getElementById('passphraseInput').value = saved;
+    await unlockDashboard();
+  }
+})();
+
+function fmtDelta(cur, prev) {
+  if (prev === null || prev === undefined) return { text: 'eerste meting', cls: 'flat' };
+  const d = cur - prev;
+  if (d > 0) return { text: `+${d} sinds gisteren`, cls: 'up' };
+  if (d < 0) return { text: `${d} sinds gisteren`, cls: 'down' };
+  return { text: 'geen wijziging', cls: 'flat' };
+}
+
+function renderCards() {
+  const latest = history[history.length - 1];
+  const prev = history.length > 1 ? history[history.length - 2] : null;
+  const cards = [
+    { label: 'Volgers', value: latest.followers_count, delta: fmtDelta(latest.followers_count, prev ? prev.followers_count : null) },
+    { label: 'Volgend', value: latest.follows_count, delta: fmtDelta(latest.follows_count, prev ? prev.follows_count : null) },
+  ];
+  document.getElementById('summaryCards').innerHTML = cards.map(c => `
+    <div class="card">
+      <div class="label">${c.label}</div>
+      <div class="value">${c.value.toLocaleString('nl-NL')}</div>
+      <div class="delta ${c.delta.cls}">${c.delta.text}</div>
+    </div>
+  `).join('');
+}
+
+let chartInstance = null, growthChartInstance = null;
+function renderCharts() {
+  const labels = history.map(h => h.date);
+  const followerData = history.map(h => h.followers_count);
+  const followingData = history.map(h => h.follows_count);
+  const ctx = document.getElementById('historyChart').getContext('2d');
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Volgers', data: followerData, borderColor: '#E1306C', backgroundColor: 'rgba(225,48,108,0.08)', tension: .25, fill: true },
+      { label: 'Volgend', data: followingData, borderColor: '#405DE6', backgroundColor: 'rgba(64,93,230,0.06)', tension: .25, fill: true },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: false } } }
+  });
+
+  const growthLabels = [], growthData = [];
+  for (let i = 1; i < history.length; i++) {
+    growthLabels.push(history[i].date);
+    growthData.push(history[i].followers_count - history[i-1].followers_count);
+  }
+  const gctx = document.getElementById('growthChart').getContext('2d');
+  if (growthChartInstance) growthChartInstance.destroy();
+  growthChartInstance = new Chart(gctx, {
+    type: 'bar',
+    data: { labels: growthLabels.length ? growthLabels : ['—'], datasets: [{
+      label: 'Netto nieuwe volgers', data: growthData.length ? growthData : [0],
+      backgroundColor: (growthData.length ? growthData : [0]).map(v => v >= 0 ? '#1a7f37' : '#d93025'),
+    }]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+function renderAll() {
+  const latest = history[history.length - 1];
+  document.getElementById('headerSubtitle').textContent = `Laatste update: ${latest.date} · ${history.length} meting${history.length === 1 ? '' : 'en'}`;
+  renderCards();
+  renderCharts();
+}
+</script>
+
+</body>
+</html>
