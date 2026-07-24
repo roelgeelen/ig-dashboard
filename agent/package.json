@@ -5,6 +5,7 @@
   "description": "Lokale agent die elke 4 dagen automatisch de officiele Instagram data-export aanvraagt, ophaalt en versleuteld naar GitHub pusht.",
   "scripts": {
     "login": "node login.js",
+    "seed": "node seed.js",
     "run": "node run.js",
     "run:headful": "node run.js --headful",
     "status": "node status.js",

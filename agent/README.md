@@ -33,7 +33,21 @@ Daarna één keer inloggen. Er opent een echt browservenster; jij typt je wachtw
 npm run login
 ```
 
-Test of alles werkt, met een zichtbare browser zodat je meekijkt:
+## Beginnen met een export die je al hebt
+
+Heb je al een export-zip op je schijf staan, zet die er dan meteen in — dan hoef je niet vier dagen op de eerste meting te wachten:
+
+```bash
+node seed.js "..\..\exports\instagram-....zip"
+```
+
+Zonder `--dry-run` gaat hij versleuteld naar GitHub en staat hij direct op je telefoon. Met `--dry-run` controleert hij alleen of de zip leesbaar is; dat werkt ook zonder `.env`.
+
+Dit is meteen de beste manier om de rest van de keten te controleren — lezen, vergelijken, versleutelen, opslaan — voordat je je met Meta's UI bezighoudt.
+
+## Testen
+
+Test of de browser-automatisering werkt, met een zichtbaar venster zodat je meekijkt:
 
 ```bash
 node run.js --headful --force
@@ -88,6 +102,7 @@ Het log staat in `agent/agent.log`.
 |---|---|
 | `run.js` | de statemachine hierboven |
 | `login.js` | eenmalige zichtbare login |
+| `seed.js` | een bestaande export-zip inlezen, zonder browser |
 | `status.js` | leest alleen, wijzigt niets |
 | `lib/export.js` | het enige deel dat van Meta's UI afhangt |
 | `lib/parse.js` | export-zip → dashboardformaat (JSON, met HTML als vangnet) |
