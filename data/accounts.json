@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "default": "dutch_718_gts",
+  "accounts": [
+    {
+      "slug": "dutch_718_gts",
+      "username": "dutch_718_gts",
+      "label": "@dutch_718_gts"
+    },
+    {
+      "slug": "launchlygo_app",
+      "username": "launchlygo.app",
+      "label": "@launchlygo.app"
+    }
+  ]
+}

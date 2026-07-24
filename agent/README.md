@@ -8,6 +8,22 @@ De Instagram Graph API geeft alleen `followers_count` — er bestaat geen endpoi
 
 Instagram staat maximaal **één export per vier dagen** toe. Sneller dan dat kan niet, langs geen enkele legitieme weg. De dagelijkse GitHub Action blijft ondertussen wel elke dag het volgersaantal ophalen, dus je ziet dagelijks *dat* er iets veranderde en om de vier dagen *wie*.
 
+## Meerdere accounts
+
+De accounts die het dashboard volgt staan in `data/accounts.json` (platte tekst — het zijn je eigen publieke gebruikersnamen). Elk account heeft een eigen submap `data/<slug>/` met dezelfde vier versleutelde bestanden. De agent leest dit manifest van GitHub en werkt alle accounts bij; per run vraagt hij hoogstens één nieuwe export aan (de gedeelde exportlimiet), dus over opeenvolgende dagen komen de accounts om beurten aan bod.
+
+Een account toevoegen:
+
+1. **Naamlijsten** werken meteen — de agent kiest het juiste profiel in de export-wizard. Heb je al een export-zip, lees hem dan in met het juiste account:
+   ```bash
+   node seed.js "<pad-naar-export.zip>" --account launchlygo.app
+   ```
+2. **Dagelijkse aantallen** hebben een eigen Instagram Graph API-token nodig (alleen mogelijk bij een Business/Creator-account). Zet het één keer klaar en push het:
+   ```bash
+   ENCRYPTION_PASSPHRASE=<jouw-passphrase> node ../scripts/set-token.js launchlygo.app <access_token>
+   ```
+   Vanaf dan ververst de dagelijkse Action het token zelf en haalt hij de aantallen op, net als bij het eerste account.
+
 ## Eenmalig installeren
 
 ```bash
@@ -102,8 +118,9 @@ Het log staat in `agent/agent.log`.
 |---|---|
 | `run.js` | de statemachine hierboven |
 | `login.js` | eenmalige zichtbare login |
-| `seed.js` | een bestaande export-zip inlezen, zonder browser |
-| `status.js` | leest alleen, wijzigt niets |
+| `seed.js` | een bestaande export-zip inlezen, zonder browser (`--account` voor welk profiel) |
+| `status.js` | leest alleen, wijzigt niets (per account) |
+| `lib/accounts.js` | leest `data/accounts.json`: welke accounts moeten bijgewerkt worden |
 | `lib/export.js` | het enige deel dat van Meta's UI afhangt |
 | `lib/parse.js` | export-zip → dashboardformaat (JSON, met HTML als vangnet) |
 | `lib/store.js` | het v2-opslagformaat |

@@ -1,154 +1,199 @@
-// Dagelijkse run. Doet per keer maximaal een ding en is daarna klaar:
+// Dagelijkse run. Werkt elk gevolgd account bij en doet per keer weinig:
 //
-//   IDLE    + laatste meting >= interval oud  -> export aanvragen -> PENDING
-//   PENDING + export staat klaar              -> ophalen, verwerken -> IDLE
-//   PENDING + nog niet klaar                  -> niets, morgen weer
+//   Fase 1: voor elk account dat op een export wacht (PENDING) -> kijken of hij
+//           klaarstaat, en zo ja downloaden en verwerken -> IDLE.
+//   Fase 2: staat er daarna geen enkele export meer open, dan hoogstens EEN
+//           nieuwe export aanvragen, voor het account dat het langst geleden
+//           gemeten is. Instagram staat maar mondjesmaat exports toe, dus we
+//           belasten die limiet met niet meer dan één aanvraag per run. Over
+//           opeenvolgende dagen komen zo alle accounts om beurten aan bod.
 //
-// Er wordt nooit gewacht in een lus, dus een run duurt seconden en er blijft
-// niets op de achtergrond hangen.
+// Er wordt nooit gewacht in een lus, dus een run duurt seconden.
 
 const env = require('./lib/env');
 const log = require('./lib/log');
 const state = require('./lib/state');
 const store = require('./lib/store');
 const github = require('./lib/github');
+const { loadAccounts } = require('./lib/accounts');
 const { parseExportZip } = require('./lib/parse');
 const { encrypt, decrypt } = require('../scripts/crypto-utils');
 const { openContext, SessionExpiredError } = require('./lib/session');
 const { requestExport, tryDownloadReady, cleanupDownload } = require('./lib/export');
 
-const NAMES_PATH = 'data/names.enc.json';
-const STATUS_PATH = 'data/agent-status.enc.json';
+const namesPath = (slug) => `data/${slug}/names.enc.json`;
+const statusPath = (slug) => `data/${slug}/agent-status.enc.json`;
 const PENDING_GIVE_UP_DAYS = 14;
 
 const headful = process.argv.includes('--headful');
 const force = process.argv.includes('--force');
 // Loopt de wizard helemaal door maar stopt vlak voor "Export starten", zodat je
-// de knoppen kunt controleren zonder je limiet van een export per vier dagen op
-// te maken.
+// de knoppen kunt controleren zonder je exportlimiet op te maken.
 const dryRun = process.argv.includes('--dry-run');
 
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function loadStore(cfg) {
-  const file = await github.getFile(cfg.githubToken, NAMES_PATH);
+async function loadStore(cfg, slug) {
+  const file = await github.getFile(cfg.githubToken, namesPath(slug));
   if (!file) {
-    log.info('Nog geen names.enc.json op GitHub - dit wordt de eerste meting.');
+    log.info(`[${slug}] Nog geen naamlijst op GitHub - dit wordt de eerste meting.`);
     return store.emptyStore();
   }
   const blob = JSON.parse(file.text);
   return store.normalize(decrypt(cfg.passphrase, blob.data));
 }
 
-async function saveStore(cfg, next, message) {
+async function saveStore(cfg, slug, next, message) {
   const text = JSON.stringify({ v: 1, data: encrypt(cfg.passphrase, next) }, null, 2) + '\n';
-  await github.putFile(cfg.githubToken, NAMES_PATH, text, message);
+  await github.putFile(cfg.githubToken, namesPath(slug), text, message);
 }
 
 // Het dashboard laat hiermee zien of de agent nog gezond is. Versleuteld, omdat
 // een foutmelding paden van je PC kan bevatten.
-async function saveStatus(cfg, s) {
+async function saveStatus(cfg, slug, sub, lastRunAt) {
   const payload = {
-    phase: s.phase,
-    requestedAt: s.requestedAt,
-    lastSuccessDate: s.lastSuccessDate,
-    lastRunAt: s.lastRunAt,
-    lastError: s.lastError,
-    sessionValid: s.sessionValid,
-    consecutiveFailures: s.consecutiveFailures,
+    phase: sub.phase,
+    requestedAt: sub.requestedAt,
+    lastSuccessDate: sub.lastSuccessDate,
+    lastRunAt,
+    lastError: sub.lastError,
+    sessionValid: sub.sessionValid,
+    consecutiveFailures: sub.consecutiveFailures,
   };
   const text = JSON.stringify({ v: 1, data: encrypt(cfg.passphrase, payload) }, null, 2) + '\n';
-  await github.putFile(cfg.githubToken, STATUS_PATH, text, 'Agent-status bijgewerkt');
+  await github.putFile(cfg.githubToken, statusPath(slug), text, `Agent-status bijgewerkt (${slug})`);
 }
 
-async function processDownload(cfg, s, buffer) {
+async function processDownload(cfg, slug, sub, buffer) {
   const snapshot = parseExportZip(buffer, today());
-  log.info(`Export gelezen: ${snapshot.followers.length} volgers, ${snapshot.following.length} volgend.`);
+  log.info(`[${slug}] Export gelezen: ${snapshot.followers.length} volgers, ${snapshot.following.length} volgend.`);
 
-  const current = await loadStore(cfg);
+  const current = await loadStore(cfg, slug);
   const { store: next, changes } = store.applySnapshot(current, snapshot);
 
   if (changes.isFirst) {
-    log.info('Eerste meting - nog niets om mee te vergelijken.');
+    log.info(`[${slug}] Eerste meting - nog niets om mee te vergelijken.`);
   } else {
     log.info(
-      `Nieuwe volgers: ${changes.newFollowers.length}, ontvolgd door: ${changes.lostFollowers.length}, ` +
+      `[${slug}] Nieuwe volgers: ${changes.newFollowers.length}, ontvolgd door: ${changes.lostFollowers.length}, ` +
         `jij ging volgen: ${changes.newFollowing.length}, jij ontvolgde: ${changes.unfollowedByYou.length}.`
     );
     if (changes.newFollowers.length) log.info('  + ' + changes.newFollowers.join(', '));
     if (changes.lostFollowers.length) log.info('  - ' + changes.lostFollowers.join(', '));
   }
 
-  await saveStore(cfg, next, `Naamlijst automatisch bijgewerkt (${snapshot.date})`);
-  log.info('Naamlijst opgeslagen op GitHub.');
+  await saveStore(cfg, slug, next, `Naamlijst automatisch bijgewerkt (${slug}, ${snapshot.date})`);
+  log.info(`[${slug}] Naamlijst opgeslagen op GitHub.`);
 
-  s.phase = state.IDLE;
-  s.requestedAt = null;
-  s.lastSuccessDate = snapshot.date;
-  s.lastError = null;
-  s.consecutiveFailures = 0;
+  sub.phase = state.IDLE;
+  sub.requestedAt = null;
+  sub.lastSuccessDate = snapshot.date;
+  sub.lastError = null;
+  sub.consecutiveFailures = 0;
+}
+
+// Kijkt of de openstaande export voor dit account klaarstaat en verwerkt hem.
+async function handlePending(cfg, page, acc, sub) {
+  // Een aanvraag die na twee weken nog niet is opgehaald, is vrijwel zeker
+  // verlopen - Instagram bewaart een download maar een paar dagen.
+  if (sub.requestedAt) {
+    const pendingDays = (Date.now() - Date.parse(sub.requestedAt)) / 86400000;
+    if (pendingDays > PENDING_GIVE_UP_DAYS) {
+      log.warn(`[${acc.slug}] Aanvraag staat al ${Math.round(pendingDays)} dagen open en is waarschijnlijk verlopen. Terug naar IDLE.`);
+      sub.phase = state.IDLE;
+      sub.requestedAt = null;
+      return;
+    }
+  }
+
+  const result = await tryDownloadReady(page);
+  if (result) {
+    await processDownload(cfg, acc.slug, sub, result.buffer);
+    cleanupDownload(result.file);
+  } else {
+    log.info(`[${acc.slug}] Export nog in behandeling bij Instagram. Volgende run kijkt opnieuw.`);
+  }
 }
 
 async function main() {
   const cfg = env.load();
+  const { accounts, default: defaultSlug } = await loadAccounts(cfg);
+  log.info(`Accounts: ${accounts.map((a) => a.username).join(', ')}.`);
+
   const s = state.load();
   s.lastRunAt = new Date().toISOString();
-
-  const current = await loadStore(cfg);
-  const age = store.daysSinceLastMeasurement(current, today());
-  log.info(`Fase: ${s.phase}. Laatste meting: ${store.lastMeasurementDate(current) || 'geen'} (${age === Infinity ? 'nooit' : age + ' dagen geleden'}).`);
-
-  // Een aanvraag die na twee weken nog niet is opgehaald, is vrijwel zeker
-  // verlopen - Instagram bewaart een download maar vier dagen.
-  if (s.phase === state.PENDING && s.requestedAt) {
-    const pendingDays = (Date.now() - Date.parse(s.requestedAt)) / 86400000;
-    if (pendingDays > PENDING_GIVE_UP_DAYS) {
-      log.warn(`Aanvraag staat al ${Math.round(pendingDays)} dagen open en is waarschijnlijk verlopen. Terug naar IDLE.`);
-      s.phase = state.IDLE;
-      s.requestedAt = null;
-    }
-  }
-
-  const needsExport = s.phase === state.IDLE && (force || age >= cfg.intervalDays);
-  if (s.phase === state.IDLE && !needsExport) {
-    log.info(`Nog geen nieuwe export nodig (interval is ${cfg.intervalDays} dagen). Klaar.`);
-    s.sessionValid = true;
-    state.save(s);
-    await saveStatus(cfg, s);
-    return;
-  }
+  // Zorg dat elk account een substate heeft (en migreer eventueel oude state).
+  for (const acc of accounts) state.forAccount(s, acc.slug, acc.slug === defaultSlug);
 
   const context = await openContext({ headless: !headful });
   const page = context.pages()[0] || (await context.newPage());
 
   try {
-    if (s.phase === state.PENDING) {
-      const result = await tryDownloadReady(page);
-      if (result) {
-        await processDownload(cfg, s, result.buffer);
-        cleanupDownload(result.file);
-      } else {
-        log.info('Export nog in behandeling bij Instagram. Volgende run kijkt opnieuw.');
-      }
-    } else {
-      const submitted = await requestExport(page, { username: cfg.username, dryRun });
-      if (submitted) {
-        s.phase = state.PENDING;
-        s.requestedAt = new Date().toISOString();
-        s.lastError = null;
-        s.consecutiveFailures = 0;
-      } else {
-        log.info('Droogloop: er is niets aangevraagd, de fase blijft ongewijzigd.');
+    // ---- Fase 1: openstaande exports ophalen ----
+    for (const acc of accounts) {
+      const sub = s.accounts[acc.slug];
+      if (sub.phase !== state.PENDING) continue;
+      try {
+        await handlePending(cfg, page, acc, sub);
+        sub.sessionValid = true;
+      } catch (err) {
+        if (err instanceof SessionExpiredError) throw err;
+        sub.lastError = err.message;
+        sub.consecutiveFailures = (sub.consecutiveFailures || 0) + 1;
+        log.error(`[${acc.slug}] Ophalen mislukt: ${err.message}`);
       }
     }
-    s.sessionValid = true;
+
+    // ---- Fase 2: hoogstens één nieuwe export aanvragen ----
+    const anyPending = accounts.some((a) => s.accounts[a.slug].phase === state.PENDING);
+    if (anyPending) {
+      log.info('Er staat nog een export open; geen nieuwe aangevraagd deze run.');
+    } else {
+      let target = null;
+      for (const acc of accounts) {
+        const sub = s.accounts[acc.slug];
+        if (sub.phase !== state.IDLE) continue;
+        const cur = await loadStore(cfg, acc.slug);
+        const age = store.daysSinceLastMeasurement(cur, today());
+        log.info(`[${acc.slug}] Laatste meting: ${store.lastMeasurementDate(cur) || 'geen'} (${age === Infinity ? 'nooit' : age + ' dagen geleden'}).`);
+        if ((force || age >= cfg.intervalDays) && (!target || age > target.age)) {
+          target = { acc, sub, age };
+        }
+      }
+
+      if (!target) {
+        log.info(`Geen account is toe aan een nieuwe export (interval is ${cfg.intervalDays} dagen). Klaar.`);
+      } else {
+        try {
+          const submitted = await requestExport(page, { username: target.acc.username, dryRun });
+          if (submitted) {
+            target.sub.phase = state.PENDING;
+            target.sub.requestedAt = new Date().toISOString();
+            target.sub.lastError = null;
+            target.sub.consecutiveFailures = 0;
+            log.info(`[${target.acc.slug}] Export aangevraagd.`);
+          } else {
+            log.info(`[${target.acc.slug}] Droogloop: er is niets aangevraagd, de fase blijft ongewijzigd.`);
+          }
+          target.sub.sessionValid = true;
+        } catch (err) {
+          if (err instanceof SessionExpiredError) throw err;
+          target.sub.lastError = err.message;
+          target.sub.consecutiveFailures = (target.sub.consecutiveFailures || 0) + 1;
+          log.error(`[${target.acc.slug}] Aanvragen mislukt: ${err.message}`);
+        }
+      }
+    }
   } catch (err) {
-    s.lastError = err.message;
-    s.consecutiveFailures = (s.consecutiveFailures || 0) + 1;
     if (err instanceof SessionExpiredError) {
-      s.sessionValid = false;
+      // De login is voor alle accounts dezelfde, dus markeer ze allemaal.
+      for (const acc of accounts) {
+        const sub = s.accounts[acc.slug];
+        sub.sessionValid = false;
+        sub.lastError = err.message;
+      }
       log.error('Sessie verlopen. Draai "npm run login" om opnieuw in te loggen.');
     } else {
       log.error('Run mislukt: ' + err.message);
@@ -157,7 +202,10 @@ async function main() {
   } finally {
     await context.close().catch(() => {});
     state.save(s);
-    await saveStatus(cfg, s).catch((e) => log.warn('Status wegschrijven mislukt: ' + e.message));
+    for (const acc of accounts) {
+      const sub = s.accounts[acc.slug];
+      if (sub) await saveStatus(cfg, acc.slug, sub, s.lastRunAt).catch((e) => log.warn(`[${acc.slug}] Status wegschrijven mislukt: ` + e.message));
+    }
   }
 }
 

@@ -13,7 +13,22 @@ const { decrypt } = require('../scripts/crypto-utils');
 const AGENT_DIR = __dirname;
 const REPO_DIR = path.join(AGENT_DIR, '..');
 const ENV_FILE = path.join(AGENT_DIR, '.env');
-const HISTORY_FILE = path.join(REPO_DIR, 'data', 'history.enc.json');
+
+// De passphrase-check leest de geschiedenis van het standaardaccount. Sinds er
+// meerdere accounts kunnen zijn, staat die in een submap; val terug op het oude
+// pad voor een repo die nog niet gemigreerd is.
+function historyFileForCheck() {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(REPO_DIR, 'data', 'accounts.json'), 'utf8'));
+    const slug = manifest.default || (manifest.accounts && manifest.accounts[0] && manifest.accounts[0].slug);
+    if (slug) return path.join(REPO_DIR, 'data', slug, 'history.enc.json');
+  } catch {
+    // Geen manifest: oud pad proberen.
+  }
+  return path.join(REPO_DIR, 'data', 'history.enc.json');
+}
+
+const HISTORY_FILE = historyFileForCheck();
 
 function say(msg) {
   console.log(msg);
@@ -109,7 +124,7 @@ async function main() {
 
   // ---- 2. Passphrase ----
   if (!fs.existsSync(HISTORY_FILE)) {
-    say('  [2/5] Passphrase  : data/history.enc.json ontbreekt, kan niet controleren.');
+    say('  [2/5] Passphrase  : ' + path.relative(REPO_DIR, HISTORY_FILE) + ' ontbreekt, kan niet controleren.');
     process.exit(1);
   }
 
@@ -124,7 +139,7 @@ async function main() {
       say('        Klopt - de bestaande geschiedenis is ermee te lezen.');
       break;
     }
-    say('        Onjuist: hiermee is data/history.enc.json niet te ontsleutelen.');
+    say('        Onjuist: hiermee is ' + path.relative(REPO_DIR, HISTORY_FILE) + ' niet te ontsleutelen.');
     passphrase = '';
   }
   if (!passphrase) {

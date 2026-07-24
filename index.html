@@ -13,8 +13,11 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
   header.top { background:linear-gradient(90deg,#405DE6 0%,#833AB4 25%,#C13584 50%,#E1306C 75%,#F77737 100%); padding:26px 24px; color:#fff; }
+  header.top .top-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; max-width:900px; margin:0 auto; }
   header.top h1 { margin:0 0 4px 0; font-size:20px; }
   header.top p { margin:0; font-size:12.5px; opacity:.92; }
+  .account-switcher { background:rgba(255,255,255,0.18); color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:999px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; -webkit-appearance:none; appearance:none; }
+  .account-switcher option { color:#1c1e21; }
   .wrap { max-width:900px; margin:0 auto; padding:20px 16px 60px; }
   .gate { max-width:420px; margin:80px auto; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:28px; text-align:center; }
   .gate input { width:100%; padding:12px 14px; font-size:15px; border:1px solid #ccc; border-radius:8px; margin:14px 0; }
@@ -87,8 +90,13 @@
 
 <div id="app">
   <header class="top">
-    <h1>Instagram Groei Dashboard</h1>
-    <p id="headerSubtitle">Laatste update: —</p>
+    <div class="top-row">
+      <div>
+        <h1>Instagram Groei Dashboard</h1>
+        <p id="headerSubtitle">Laatste update: —</p>
+      </div>
+      <select id="accountSwitcher" class="account-switcher" style="display:none;" aria-label="Profiel kiezen"></select>
+    </div>
   </header>
   <div class="wrap">
     <div class="cards" id="summaryCards"></div>
@@ -199,24 +207,81 @@ let history = [];
 let nameStore = null;
 let agentStatus = null;
 
+// ---- meerdere profielen ----
+// data/accounts.json somt de accounts op die het dashboard volgt. Elk account
+// heeft zijn eigen submap in data/ met dezelfde vier versleutelde bestanden als
+// voorheen. De switcher bovenin wisselt tussen die submappen.
+let ACCOUNTS = [];
+let DEFAULT_ACCOUNT = null;
+let currentAccount = null;
+
+async function loadAccounts() {
+  try {
+    const res = await fetch('data/accounts.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error();
+    const m = await res.json();
+    ACCOUNTS = (m.accounts || []).map(a => ({ slug: a.slug, username: a.username, label: a.label || ('@' + a.username) }));
+    DEFAULT_ACCOUNT = m.default || (ACCOUNTS[0] && ACCOUNTS[0].slug);
+  } catch {
+    // Nog geen manifest: val terug op het oorspronkelijke ene account.
+    ACCOUNTS = [{ slug: 'dutch_718_gts', username: 'dutch_718_gts', label: '@dutch_718_gts' }];
+    DEFAULT_ACCOUNT = 'dutch_718_gts';
+  }
+  if (!ACCOUNTS.length) { ACCOUNTS = [{ slug: 'dutch_718_gts', username: 'dutch_718_gts', label: '@dutch_718_gts' }]; DEFAULT_ACCOUNT = 'dutch_718_gts'; }
+  const saved = localStorage.getItem('ig_dash_account');
+  currentAccount = (saved && ACCOUNTS.some(a => a.slug === saved)) ? saved : DEFAULT_ACCOUNT;
+}
+
+function accountPath(name) { return `data/${currentAccount}/${name}`; }
+
+function renderAccountSwitcher() {
+  const sel = document.getElementById('accountSwitcher');
+  if (!sel) return;
+  if (ACCOUNTS.length <= 1) { sel.style.display = 'none'; return; }
+  sel.innerHTML = ACCOUNTS.map(a => `<option value="${a.slug}">${a.label}</option>`).join('');
+  sel.value = currentAccount;
+  sel.style.display = '';
+}
+
+async function fetchDecrypt(path, fallback) {
+  try {
+    const res = await fetch(path, { cache: 'no-store' });
+    if (!res.ok) return fallback;
+    const blob = await res.json();
+    return await igDecrypt(PASSPHRASE, blob.data);
+  } catch { return fallback; }
+}
+
+// Laadt en toont alle data van het huidige account. Draait na het ontgrendelen
+// en telkens als er van profiel gewisseld wordt.
+async function loadAccount() {
+  history = await fetchDecrypt(accountPath('history.enc.json'), []);
+  await loadNamesFromGitHub();
+  await loadAgentStatus();
+  const sel = document.getElementById('accountSwitcher');
+  if (sel) sel.value = currentAccount;
+  renderAll();
+  renderNamesAll();
+}
+
 async function unlockDashboard() {
   const pass = document.getElementById('passphraseInput').value;
   const errEl = document.getElementById('gateErr');
   errEl.textContent = '';
   if (!pass) { errEl.textContent = 'Vul een passphrase in.'; return; }
   try {
-    const res = await fetch('data/history.enc.json', { cache: 'no-store' });
-    if (!res.ok) throw new Error('Kon data/history.enc.json niet laden (' + res.status + ')');
+    // Valideer de passphrase tegen het standaardaccount, dat zeker metingen
+    // heeft. Een net toegevoegd account kan nog leeg zijn.
+    const res = await fetch(`data/${DEFAULT_ACCOUNT}/history.enc.json`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Kon history.enc.json niet laden (' + res.status + ')');
     const blob = await res.json();
-    history = await igDecrypt(pass, blob.data);
+    await igDecrypt(pass, blob.data);
     PASSPHRASE = pass;
     sessionStorage.setItem('ig_dash_pass', pass);
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-    renderAll();
-    await loadNamesFromGitHub();
-    await loadAgentStatus();
-    renderNamesAll();
+    renderAccountSwitcher();
+    await loadAccount();
   } catch (e) {
     errEl.textContent = 'Onjuiste passphrase of data kon niet worden gelezen.';
   }
@@ -226,8 +291,16 @@ document.getElementById('passphraseInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') unlockDashboard();
 });
 
-// probeer automatisch te ontgrendelen als de passphrase deze sessie al eerder is ingevoerd
-(async function tryAutoUnlock() {
+document.getElementById('accountSwitcher').addEventListener('change', async (e) => {
+  currentAccount = e.target.value;
+  localStorage.setItem('ig_dash_account', currentAccount);
+  await loadAccount();
+});
+
+// Laad eerst het accountoverzicht, ontgrendel daarna automatisch als de
+// passphrase deze sessie al eerder is ingevoerd.
+(async function init() {
+  await loadAccounts();
   const saved = sessionStorage.getItem('ig_dash_pass');
   if (saved) {
     document.getElementById('passphraseInput').value = saved;
@@ -293,6 +366,15 @@ function renderCharts() {
 }
 
 function renderAll() {
+  if (!history.length) {
+    // Nieuw account zonder metingen: nog geen API-token, of de eerste run moet
+    // nog draaien. Leeg tonen in plaats van crashen.
+    document.getElementById('headerSubtitle').textContent = 'Nog geen dagelijkse metingen voor dit profiel';
+    document.getElementById('summaryCards').innerHTML = '<div class="empty-state">Nog geen volgersaantallen voor dit profiel. Zodra het Instagram API-token is ingesteld, verschijnen ze hier elke ochtend automatisch.</div>';
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    if (growthChartInstance) { growthChartInstance.destroy(); growthChartInstance = null; }
+    return;
+  }
   const latest = history[history.length - 1];
   document.getElementById('headerSubtitle').textContent = `Laatste update: ${latest.date} · ${history.length} meting${history.length === 1 ? '' : 'en'}`;
   renderCards();
@@ -383,7 +465,7 @@ function normalizeNameStore(raw) {
 
 async function loadNamesFromGitHub() {
   try {
-    const res = await fetch('data/names.enc.json', { cache: 'no-store' });
+    const res = await fetch(accountPath('names.enc.json'), { cache: 'no-store' });
     if (!res.ok) { nameStore = emptyNameStore(); return; }
     const blob = await res.json();
     nameStore = normalizeNameStore(await igDecrypt(PASSPHRASE, blob.data));
@@ -394,7 +476,7 @@ async function loadNamesFromGitHub() {
 
 async function loadAgentStatus() {
   try {
-    const res = await fetch('data/agent-status.enc.json', { cache: 'no-store' });
+    const res = await fetch(accountPath('agent-status.enc.json'), { cache: 'no-store' });
     if (!res.ok) { agentStatus = null; return; }
     const blob = await res.json();
     agentStatus = await igDecrypt(PASSPHRASE, blob.data);
@@ -406,7 +488,7 @@ async function loadAgentStatus() {
 async function pushNamesToGitHub(storeObj) {
   const token = ghToken();
   if (!token) throw new Error('Geen GitHub-token ingesteld. Vul deze in bij "GitHub-instellingen" hierboven.');
-  const owner = 'roelgeelen', repo = 'ig-dashboard', path = 'data/names.enc.json';
+  const owner = 'roelgeelen', repo = 'ig-dashboard', path = `data/${currentAccount}/names.enc.json`;
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
   let sha;
   const getRes = await fetch(apiUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } });

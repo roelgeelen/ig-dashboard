@@ -4,6 +4,7 @@
 // te controleren voordat je je met Meta's UI bezighoudt.
 //
 //   node seed.js "..\..\exports\instagram-....zip"
+//   node seed.js "...zip" --account launchlygo.app
 //   node seed.js "...zip" --date 2026-07-24
 //   node seed.js "...zip" --dry-run
 
@@ -13,20 +14,34 @@ const env = require('./lib/env');
 const store = require('./lib/store');
 const github = require('./lib/github');
 const state = require('./lib/state');
+const { loadAccounts, slugify } = require('./lib/accounts');
 const { parseExportZip } = require('./lib/parse');
 const { encrypt, decrypt } = require('../scripts/crypto-utils');
-
-const NAMES_PATH = 'data/names.enc.json';
 
 function arg(name) {
   const i = process.argv.indexOf('--' + name);
   return i === -1 ? null : process.argv[i + 1];
 }
 
+// Kiest het account waar deze export bij hoort: --account (gebruikersnaam of
+// slug), anders het standaardaccount uit het manifest.
+async function resolveAccount(cfg) {
+  const wanted = arg('account');
+  const { accounts, default: defaultSlug } = await loadAccounts(cfg);
+  if (wanted) {
+    const slug = slugify(wanted);
+    const found = accounts.find((a) => a.slug === slug || a.username === wanted);
+    if (found) return found;
+    // Niet in het manifest: toch toestaan, dan komt hij in zijn eigen submap.
+    return { slug, username: wanted, label: '@' + wanted };
+  }
+  return accounts.find((a) => a.slug === defaultSlug) || accounts[0];
+}
+
 async function main() {
   const zipPath = process.argv[2];
   if (!zipPath || zipPath.startsWith('--')) {
-    console.error('Gebruik: node seed.js <pad-naar-export.zip> [--date JJJJ-MM-DD] [--dry-run]');
+    console.error('Gebruik: node seed.js <pad-naar-export.zip> [--account <gebruikersnaam>] [--date JJJJ-MM-DD] [--dry-run]');
     process.exit(1);
   }
   const resolved = path.resolve(zipPath);
@@ -59,7 +74,11 @@ async function main() {
     return;
   }
 
-  const file = await github.getFile(cfg.githubToken, NAMES_PATH);
+  const account = await resolveAccount(cfg);
+  const namesPath = `data/${account.slug}/names.enc.json`;
+  console.log(`Account: ${account.username} (${account.slug}).`);
+
+  const file = await github.getFile(cfg.githubToken, namesPath);
   const current = file ? store.normalize(decrypt(cfg.passphrase, JSON.parse(file.text).data)) : store.emptyStore();
   if (file) {
     console.log('Bestaande naamlijst gevonden, laatste meting: ' + (store.lastMeasurementDate(current) || 'geen'));
@@ -82,13 +101,14 @@ async function main() {
   }
 
   const text = JSON.stringify({ v: 1, data: encrypt(cfg.passphrase, next) }, null, 2) + '\n';
-  await github.putFile(cfg.githubToken, NAMES_PATH, text, `Naamlijst ingelezen uit bestaande export (${date})`);
+  await github.putFile(cfg.githubToken, namesPath, text, `Naamlijst ingelezen uit bestaande export (${account.slug}, ${date})`);
   console.log(`\nOpgeslagen op GitHub (${Math.round(text.length / 1024)} KB). Ververs het dashboard op je telefoon.`);
 
   // Zodat de agent weet dat er al een meting is en niet meteen een nieuwe
   // export aanvraagt die pas over vier dagen mag.
   const s = state.load();
-  s.lastSuccessDate = date;
+  const sub = state.forAccount(s, account.slug, true);
+  sub.lastSuccessDate = date;
   state.save(s);
 }
 
