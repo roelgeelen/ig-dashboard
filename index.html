@@ -4,8 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Instagram Groei Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/theme/mermaid.min.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/gridjs.umd.js" integrity="sha384-/XXDzxe4FsGiAe50i/u9pY/Vy/uX654MHB1xoc1BJNnH1WXHhqHga9g3q5tF4gj7" crossorigin="anonymous"></script>
 <style>
   :root { color-scheme: light; --pink:#E1306C; --purple:#833AB4; --blue:#405DE6; --bg:#fafafa; --card:#fff; --border:#e8e8e8; --text:#1c1e21; --muted:#65676b; }
   * { box-sizing: border-box; }
@@ -30,8 +32,34 @@
   #app { display:none; }
   .hidden { display:none !important; }
   footer { text-align:center; font-size:11px; color:var(--muted); padding:16px 0 30px; }
-  .status-msg { font-size:12.5px; padding:9px 11px; border-radius:8px; margin-top:10px; }
+  .status-msg { font-size:12.5px; padding:9px 11px; border-radius:8px; margin-top:10px; display:none; }
+  .status-msg.show { display:block; }
   .status-msg.success{background:#e6f4ea;color:#1a7f37;} .status-msg.error{background:#fce8e6;color:#d93025;} .status-msg.info{background:#eef2ff;color:#3730a3;}
+  .dropzone { border:2px dashed #d6c2d6; border-radius:10px; padding:22px; text-align:center; background:#fdfaff; cursor:pointer; transition:background .15s, border-color .15s; }
+  .dropzone.drag { background:#f6ecf9; border-color:var(--pink); }
+  .dropzone .big { font-size:14px; font-weight:600; margin-bottom:4px; }
+  .dropzone .small { font-size:12px; color:var(--muted); }
+  .dropzone input[type=file] { display:none; }
+  .fallback-form { display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+  .fallback-form.show { display:block; }
+  .upload-row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .upload-row input[type=file] { border:1px dashed #c9c9c9; border-radius:8px; padding:10px; font-size:12.5px; background:#fcfcfc; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:12.5px; cursor:pointer; width:auto; }
+  button.linklike { background:none; border:none; color:var(--pink); font-size:12px; cursor:pointer; padding:0; text-decoration:underline; width:auto; }
+  .tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .tab { padding:8px 14px; border-radius:999px; font-size:12.5px; cursor:pointer; border:1px solid var(--border); background:#fff; color:var(--text); white-space:nowrap; }
+  .tab.active { background:var(--text); color:#fff; border-color:var(--text); }
+  .tab .count { opacity:.65; font-size:11px; margin-left:4px; }
+  .tabpage { display:none; }
+  .tabpage.active { display:block; }
+  .empty-state { padding:30px 10px; text-align:center; color:var(--muted); font-size:13px; }
+  a.profile-link { color:var(--pink); text-decoration:none; font-weight:600; }
+  a.profile-link:hover { text-decoration:underline; }
+  details.gh-settings { font-size:12.5px; }
+  details.gh-settings summary { cursor:pointer; color:var(--muted); }
+  details.gh-settings input[type=password] { width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; margin-top:8px; font-size:13px; }
+  details.gh-settings .row { display:flex; gap:8px; margin-top:10px; }
+  details.gh-settings button { width:auto; }
 </style>
 </head>
 <body>
@@ -53,7 +81,7 @@
     <div class="cards" id="summaryCards"></div>
     <div class="panel">
       <h2>Volgers &amp; volgend over tijd</h2>
-      <div class="sub">Automatisch bijgewerkt, elke ochtend</div>
+      <div class="sub">Automatisch bijgewerkt, elke ochtend via de Instagram API</div>
       <div style="height:240px;"><canvas id="historyChart"></canvas></div>
     </div>
     <div class="panel">
@@ -61,9 +89,51 @@
       <div class="sub">Netto verandering in volgers t.o.v. de vorige dag</div>
       <div style="height:200px;"><canvas id="growthChart"></canvas></div>
     </div>
+
+    <div class="panel">
+      <h2>Naamlijsten bijwerken</h2>
+      <div class="sub">Instagram biedt geen live API voor wie je precies volgt/ontvolgt. Vraag af en toe je export aan (Instagram → Instellingen → "Je informatie downloaden" → Volgers en gevolgde accounts, HTML-formaat) en sleep de .zip hieronder — werkt ook vanaf je telefoon. De lijst wordt versleuteld opgeslagen op GitHub zodat je 'm overal ziet.</div>
+
+      <div class="dropzone" id="dropzone">
+        <div class="big">Sleep je export .zip hierheen, of klik om te kiezen</div>
+        <div class="small">Wordt direct in de browser gelezen, daarna versleuteld opgeslagen</div>
+        <input type="file" id="zipInput" accept=".zip" />
+      </div>
+      <div style="margin-top:10px;">
+        <button class="linklike" id="toggleFallback">Of upload losse HTML-bestanden in plaats van een zip</button>
+      </div>
+      <div class="fallback-form" id="fallbackForm">
+        <div class="sub">Pak de zip uit en selecteer <code>connections/followers_and_following/followers_1.html</code> en <code>following.html</code> samen.</div>
+        <div class="upload-row">
+          <input type="file" id="fileInput" multiple accept=".html" />
+          <button class="primary" id="processBtn" disabled style="width:auto;">Vergelijken &amp; opslaan</button>
+        </div>
+      </div>
+      <div class="status-msg" id="namesStatus"></div>
+
+      <details class="gh-settings" style="margin-top:16px;">
+        <summary>GitHub-instellingen (eenmalig, nodig om op te slaan)</summary>
+        <div class="sub" style="margin-top:8px;">Nodig: een fine-grained Personal Access Token met <b>Contents: Read and write</b> op alleen de repo <code>roelgeelen/ig-dashboard</code>. Aanmaken via <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.</div>
+        <input type="password" id="ghTokenInput" placeholder="github_pat_..." autocomplete="off" />
+        <label style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+          <input type="checkbox" id="ghRememberCheck" checked style="width:auto;" /> Onthouden in deze browser
+        </label>
+        <div class="row">
+          <button class="primary" id="ghSaveBtn" style="width:auto;">Token opslaan</button>
+          <button class="ghost" id="ghClearBtn">Token wissen</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <div id="namesLastUpdate" class="sub" style="margin-bottom:6px;">Nog geen naamlijst-export geüpload.</div>
+      <div class="cards" id="nameCards"></div>
+      <div class="tabs" id="nameTabBar" style="margin-top:16px;"></div>
+      <div id="nameTabPages"></div>
+    </div>
   </div>
   <footer>
-    Cijfers worden dagelijks automatisch opgehaald via de officiële Instagram API. Data is lokaal versleuteld met je passphrase.
+    Aantallen worden dagelijks automatisch opgehaald via de officiële Instagram API. Naamlijsten worden bijgewerkt via je export-upload. Alle data is versleuteld met je passphrase.
   </footer>
 </div>
 
@@ -112,6 +182,7 @@ async function igEncrypt(passphrase, obj) {
 // ---- app state ----
 let PASSPHRASE = null;
 let history = [];
+let nameSnapshots = [];
 
 async function unlockDashboard() {
   const pass = document.getElementById('passphraseInput').value;
@@ -128,6 +199,8 @@ async function unlockDashboard() {
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     renderAll();
+    await loadNamesFromGitHub();
+    renderNamesAll();
   } catch (e) {
     errEl.textContent = 'Onjuiste passphrase of data kon niet worden gelezen.';
   }
@@ -209,6 +282,357 @@ function renderAll() {
   renderCards();
   renderCharts();
 }
+
+// =====================================================================
+// ---- Naamlijsten (nieuwe volgers, ontvolgers, non-mutuals, fans, ...) ----
+// =====================================================================
+
+function ghToken() {
+  return localStorage.getItem('ig_dash_gh_token') || sessionStorage.getItem('ig_dash_gh_token_session') || '';
+}
+
+async function loadNamesFromGitHub() {
+  try {
+    const res = await fetch('data/names.enc.json', { cache: 'no-store' });
+    if (!res.ok) { nameSnapshots = []; return; }
+    const blob = await res.json();
+    nameSnapshots = await igDecrypt(PASSPHRASE, blob.data);
+  } catch (e) {
+    nameSnapshots = [];
+  }
+}
+
+async function pushNamesToGitHub(snapshotsArr) {
+  const token = ghToken();
+  if (!token) throw new Error('Geen GitHub-token ingesteld. Vul deze in bij "GitHub-instellingen" hierboven.');
+  const owner = 'roelgeelen', repo = 'ig-dashboard', path = 'data/names.enc.json';
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  let sha;
+  const getRes = await fetch(apiUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } });
+  if (getRes.ok) { const j = await getRes.json(); sha = j.sha; }
+  else if (getRes.status !== 404) { throw new Error('Kon huidige bestand niet controleren (status ' + getRes.status + ')'); }
+  const cipherB64 = await igEncrypt(PASSPHRASE, snapshotsArr);
+  const fileText = JSON.stringify({ v: 1, data: cipherB64 }, null, 2) + '\n';
+  const contentB64 = btoa(unescape(encodeURIComponent(fileText)));
+  const body = { message: 'Naamlijst bijgewerkt via dashboard-upload', content: contentB64, branch: 'main' };
+  if (sha) body.sha = sha;
+  const putRes = await fetch(apiUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!putRes.ok) {
+    const t = await putRes.text();
+    throw new Error('GitHub-opslag mislukt (status ' + putRes.status + '): ' + t.slice(0, 200));
+  }
+}
+
+function setNamesStatus(msg, kind) {
+  const el = document.getElementById('namesStatus');
+  el.textContent = msg;
+  el.className = 'status-msg show ' + (kind || 'info');
+}
+
+function toSet(pairs) { return new Set(pairs.map(p => p[0])); }
+function toMap(pairs) { const m = new Map(); pairs.forEach(p => m.set(p[0], p[1])); return m; }
+
+function diffAllNames() {
+  if (!nameSnapshots.length) return null;
+  const latest = nameSnapshots[nameSnapshots.length - 1];
+  const prev = nameSnapshots.length > 1 ? nameSnapshots[nameSnapshots.length - 2] : null;
+
+  const curFollowers = toSet(latest.followers);
+  const curFollowing = toSet(latest.following);
+  const followersSince = toMap(latest.followers);
+  const followingSince = toMap(latest.following);
+
+  const notFollowingBack = [...curFollowing].filter(u => !curFollowers.has(u));
+  const fans = [...curFollowers].filter(u => !curFollowing.has(u));
+  const mutuals = [...curFollowers].filter(u => curFollowing.has(u));
+
+  let newFollowers = [], lostFollowers = [], newFollowing = [], unfollowedByYou = [];
+  if (prev) {
+    const prevFollowers = toSet(prev.followers);
+    const prevFollowing = toSet(prev.following);
+    newFollowers = [...curFollowers].filter(u => !prevFollowers.has(u));
+    lostFollowers = [...prevFollowers].filter(u => !curFollowers.has(u));
+    newFollowing = [...curFollowing].filter(u => !prevFollowing.has(u));
+    unfollowedByYou = [...prevFollowing].filter(u => !curFollowing.has(u));
+  }
+
+  return {
+    latest, prev,
+    counts: { followers: curFollowers.size, following: curFollowing.size, notFollowingBack: notFollowingBack.length, fans: fans.length, mutuals: mutuals.length },
+    notFollowingBack, fans, mutuals, newFollowers, lostFollowers, newFollowing, unfollowedByYou,
+    followingSince, followersSince,
+    pending: latest.pending || [], recentRequests: latest.recentRequests || [], recentlyUnfollowed: latest.recentlyUnfollowed || [],
+  };
+}
+
+function renderNameCards(d) {
+  const el = document.getElementById('nameCards');
+  if (!d) { el.innerHTML = ''; return; }
+  const cards = [
+    { label: 'Elkaar volgend', value: d.counts.mutuals, sub: 'volgen elkaar wederzijds' },
+    { label: 'Jij volgt, geen terugvolg', value: d.counts.notFollowingBack, sub: 'accounts die jij volgt' },
+    { label: 'Fans zonder terugvolg', value: d.counts.fans, sub: 'volgen jou, jij hen niet' },
+  ];
+  el.innerHTML = cards.map(c => `
+    <div class="card">
+      <div class="label">${c.label}</div>
+      <div class="value">${c.value.toLocaleString('nl-NL')}</div>
+      <div class="delta flat">${c.sub}</div>
+    </div>
+  `).join('');
+}
+
+function profileCell(username) {
+  return `<a class="profile-link" target="_blank" rel="noopener" href="https://www.instagram.com/${username}">@${username}</a>`;
+}
+
+function renderGrid(containerId, list, sinceMap, sinceLabel) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  if (!list || list.length === 0) { el.innerHTML = '<div class="empty-state">Niets te tonen.</div>'; return; }
+  const data = list.map(u => [u, sinceMap && sinceMap.has(u) ? sinceMap.get(u) : '—']);
+  new gridjs.Grid({
+    columns: [
+      { name: 'Account', formatter: (cell) => gridjs.html(profileCell(cell)) },
+      { name: sinceLabel || 'Sinds' },
+    ],
+    data, search: true, sort: true, pagination: { limit: 15 },
+  }).render(el);
+}
+
+function renderRequestGrid(containerId, list, tsLabel) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  if (!list || list.length === 0) { el.innerHTML = '<div class="empty-state">Niets te tonen.</div>'; return; }
+  const data = list.map(r => [r[0], r[1] || '—', r[2] || '—']);
+  new gridjs.Grid({
+    columns: [
+      { name: 'Account', formatter: (cell) => gridjs.html(cell ? profileCell(cell) : '—') },
+      { name: 'Naam' },
+      { name: tsLabel || 'Datum' },
+    ],
+    data, search: true, sort: true, pagination: { limit: 15 },
+  }).render(el);
+}
+
+function renderNameTabs(d) {
+  const barEl = document.getElementById('nameTabBar');
+  const pagesEl = document.getElementById('nameTabPages');
+  if (!d) {
+    barEl.innerHTML = '';
+    pagesEl.innerHTML = '<div class="empty-state">Nog geen naamlijst-data. Upload hierboven je export-zip om te beginnen.</div>';
+    return;
+  }
+  const tabs = [
+    { id: 'newFollowers', label: 'Nieuwe volgers', count: d.newFollowers.length, kind: 'grid', data: d.newFollowers, since: d.followersSince, sinceLabel: 'Volgt sinds' },
+    { id: 'lostFollowers', label: 'Ontvolgd door', count: d.lostFollowers.length, kind: 'grid', data: d.lostFollowers, since: null, sinceLabel: 'Status' },
+    { id: 'notFollowingBack', label: 'Jij volgt, geen terugvolg', count: d.notFollowingBack.length, kind: 'grid', data: d.notFollowingBack, since: d.followingSince, sinceLabel: 'Jij volgt sinds' },
+    { id: 'fans', label: 'Fans zonder terugvolg', count: d.fans.length, kind: 'grid', data: d.fans, since: d.followersSince, sinceLabel: 'Volgt jou sinds' },
+    { id: 'unfollowedByYou', label: 'Jij hebt ontvolgd', count: d.unfollowedByYou.length, kind: 'grid', data: d.unfollowedByYou, since: null, sinceLabel: 'Status' },
+    { id: 'pending', label: 'Wachtende volgverzoeken', count: d.pending.length, kind: 'request', data: d.pending, tsLabel: 'Verzoek verstuurd' },
+    { id: 'recentRequests', label: 'Ontvangen volgverzoeken', count: d.recentRequests.length, kind: 'request', data: d.recentRequests, tsLabel: 'Ontvangen' },
+    { id: 'recentlyUnfollowed', label: 'Recent ontvolgd (IG-log)', count: d.recentlyUnfollowed.length, kind: 'request', data: d.recentlyUnfollowed, tsLabel: 'Ontvolgd op' },
+  ];
+
+  barEl.innerHTML = tabs.map((t, i) => `<div class="tab ${i === 0 ? 'active' : ''}" data-tab="${t.id}">${t.label} <span class="count">${t.count}</span></div>`).join('');
+  pagesEl.innerHTML = tabs.map((t, i) => `<div class="tabpage ${i === 0 ? 'active' : ''}" id="npage-${t.id}"></div>`).join('');
+
+  barEl.querySelectorAll('.tab').forEach(tabEl => {
+    tabEl.addEventListener('click', () => {
+      barEl.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      pagesEl.querySelectorAll('.tabpage').forEach(x => x.classList.remove('active'));
+      tabEl.classList.add('active');
+      document.getElementById('npage-' + tabEl.dataset.tab).classList.add('active');
+    });
+  });
+
+  tabs.forEach(t => {
+    if (t.kind === 'grid') renderGrid('npage-' + t.id, t.data, t.since, t.sinceLabel);
+    else renderRequestGrid('npage-' + t.id, t.data, t.tsLabel);
+  });
+}
+
+function renderNamesAll() {
+  const d = diffAllNames();
+  renderNameCards(d);
+  renderNameTabs(d);
+  const infoEl = document.getElementById('namesLastUpdate');
+  infoEl.textContent = nameSnapshots.length
+    ? `Laatste naamlijst-update: ${nameSnapshots[nameSnapshots.length - 1].date} · ${nameSnapshots.length} export${nameSnapshots.length === 1 ? '' : 's'} verwerkt`
+    : 'Nog geen naamlijst-export geüpload.';
+}
+
+async function commitNameSnapshot(parsed, sourceLabel) {
+  if (!parsed.followers.length || !parsed.following.length) {
+    setNamesStatus('Kon geen volgers/volgend-lijst vinden in ' + sourceLabel + '. Controleer of dit de juiste Instagram-export is.', 'error');
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const newSnapshots = nameSnapshots.slice();
+  const entry = {
+    date: today, followers: parsed.followers, following: parsed.following,
+    pending: parsed.pending || [], recentRequests: parsed.recentRequests || [], recentlyUnfollowed: parsed.recentlyUnfollowed || [],
+  };
+  const idx = newSnapshots.findIndex(s => s.date === today);
+  if (idx >= 0) newSnapshots[idx] = entry; else newSnapshots.push(entry);
+
+  setNamesStatus('Opslaan naar GitHub...', 'info');
+  try {
+    await pushNamesToGitHub(newSnapshots);
+    nameSnapshots = newSnapshots;
+    setNamesStatus(`Naamlijst bijgewerkt (${today}): ${parsed.followers.length} volgers, ${parsed.following.length} volgend. Opgeslagen op GitHub.`, 'success');
+    renderNamesAll();
+  } catch (err) {
+    setNamesStatus('Fout bij opslaan: ' + err.message, 'error');
+  }
+}
+
+// ---- parsing helpers (identiek aan de lokale dashboard-parser) ----
+function parseFollowersHtml(text) {
+  const re = /<a target="_blank" href="https:\/\/www\.instagram\.com\/([^"]+)">[^<]*<\/a><\/div><div>([^<]+)<\/div>/g;
+  const out = []; let m;
+  while ((m = re.exec(text)) !== null) out.push([m[1], m[2]]);
+  return out;
+}
+function parseFollowingHtml(text) {
+  const re = /<a target="_blank" href="https:\/\/www\.instagram\.com\/_u\/([^"]+)">[^<]*<\/a><\/div><div>([^<]+)<\/div>/g;
+  const out = []; let m;
+  while ((m = re.exec(text)) !== null) out.push([m[1], m[2]]);
+  return out;
+}
+function parseRequestStyleHtml(text) {
+  const blockRe = /<table style="table-layout: fixed;">([\s\S]*?)<\/table>[\s\S]*?<div class="_3-94 _a6-o">([^<]+)<\/div>/g;
+  const rowRe = /<td class="_a6_q">([^<]+)<\/td><td class="_2piu _a6_r">([^<]*)<\/td>/g;
+  const out = []; let m;
+  while ((m = blockRe.exec(text)) !== null) {
+    const table = m[1], ts = m[2];
+    const fields = {}; let rm; rowRe.lastIndex = 0;
+    while ((rm = rowRe.exec(table)) !== null) fields[rm[1]] = rm[2];
+    out.push([fields['Gebruikersnaam'] || '', fields['Naam'] || '', ts]);
+  }
+  return out;
+}
+
+// ---- zip handling ----
+function findEntries(zip, regex) { return Object.keys(zip.files).filter(p => regex.test(p) && !zip.files[p].dir); }
+async function readAllMatching(zip, regex) {
+  const paths = findEntries(zip, regex);
+  let combined = '';
+  for (const p of paths) combined += await zip.files[p].async('string');
+  return combined;
+}
+
+async function handleZipFile(file) {
+  if (typeof JSZip === 'undefined') { setNamesStatus('Zip-ondersteuning niet beschikbaar in deze browser.', 'error'); return; }
+  setNamesStatus('Zip wordt gelezen...', 'info');
+  try {
+    const buffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buffer);
+
+    const followersHtml = await readAllMatching(zip, /followers_and_following\/followers(_\d+)?\.html$/i);
+    const followingHtml = await readAllMatching(zip, /followers_and_following\/following\.html$/i);
+    const pendingHtml = await readAllMatching(zip, /pending_follow_requests\.html$/i);
+    const recentReqHtml = await readAllMatching(zip, /recent_follow_requests\.html$/i);
+    const recentUnfollowHtml = await readAllMatching(zip, /recently_unfollowed_profiles\.html$/i);
+
+    if (!followersHtml || !followingHtml) {
+      setNamesStatus('Kon followers/following niet vinden in de zip. Is dit een Instagram-export met "Volgers en gevolgde accounts" (HTML-formaat)?', 'error');
+      return;
+    }
+
+    const parsed = {
+      followers: parseFollowersHtml(followersHtml),
+      following: parseFollowingHtml(followingHtml),
+      pending: parseRequestStyleHtml(pendingHtml),
+      recentRequests: parseRequestStyleHtml(recentReqHtml),
+      recentlyUnfollowed: parseRequestStyleHtml(recentUnfollowHtml),
+    };
+    await commitNameSnapshot(parsed, file.name);
+  } catch (err) {
+    setNamesStatus('Er ging iets mis bij het lezen van de zip: ' + err.message, 'error');
+  }
+}
+
+const dropzone = document.getElementById('dropzone');
+const zipInput = document.getElementById('zipInput');
+dropzone.addEventListener('click', () => zipInput.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.zip'));
+  if (files.length) handleZipFile(files[0]);
+  else setNamesStatus('Sleep een .zip bestand hierheen.', 'error');
+});
+zipInput.addEventListener('change', (e) => {
+  if (e.target.files.length) handleZipFile(e.target.files[0]);
+});
+
+document.getElementById('toggleFallback').addEventListener('click', () => {
+  document.getElementById('fallbackForm').classList.toggle('show');
+});
+
+let pendingFiles = { followers: null, following: null };
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  pendingFiles = { followers: null, following: null };
+  const files = Array.from(e.target.files);
+  let readCount = 0;
+  if (files.length === 0) return;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result;
+      const looksLikeFollowing = /\/_u\//.test(text) || /following/i.test(file.name);
+      if (looksLikeFollowing && !/followers/i.test(file.name)) pendingFiles.following = text;
+      else pendingFiles.followers = text;
+      readCount++;
+      if (readCount === files.length) {
+        document.getElementById('processBtn').disabled = !(pendingFiles.followers && pendingFiles.following);
+        if (!pendingFiles.followers || !pendingFiles.following) setNamesStatus('Selecteer beide bestanden: followers_1.html en following.html', 'error');
+        else setNamesStatus('Beide bestanden gevonden. Klik op "Vergelijken & opslaan".', 'success');
+      }
+    };
+    reader.readAsText(file);
+  });
+});
+
+document.getElementById('processBtn').addEventListener('click', async () => {
+  const parsed = {
+    followers: parseFollowersHtml(pendingFiles.followers || ''),
+    following: parseFollowingHtml(pendingFiles.following || ''),
+    pending: [], recentRequests: [], recentlyUnfollowed: [],
+  };
+  await commitNameSnapshot(parsed, 'de geselecteerde bestanden');
+  pendingFiles = { followers: null, following: null };
+  document.getElementById('fileInput').value = '';
+  document.getElementById('processBtn').disabled = true;
+});
+
+// ---- GitHub token settings ----
+document.getElementById('ghSaveBtn').addEventListener('click', () => {
+  const val = document.getElementById('ghTokenInput').value.trim();
+  const remember = document.getElementById('ghRememberCheck').checked;
+  if (!val) return;
+  if (remember) { localStorage.setItem('ig_dash_gh_token', val); sessionStorage.removeItem('ig_dash_gh_token_session'); }
+  else { sessionStorage.setItem('ig_dash_gh_token_session', val); localStorage.removeItem('ig_dash_gh_token'); }
+  document.getElementById('ghTokenInput').value = '';
+  setNamesStatus('GitHub-token opgeslagen.', 'success');
+});
+document.getElementById('ghClearBtn').addEventListener('click', () => {
+  localStorage.removeItem('ig_dash_gh_token');
+  sessionStorage.removeItem('ig_dash_gh_token_session');
+  setNamesStatus('GitHub-token gewist.', 'info');
+});
+(function prefillGhTokenUI() {
+  const hasToken = !!(localStorage.getItem('ig_dash_gh_token') || sessionStorage.getItem('ig_dash_gh_token_session'));
+  const input = document.getElementById('ghTokenInput');
+  if (input && hasToken) input.placeholder = '•••••••• (token ingesteld)';
+})();
 </script>
 
 </body>
