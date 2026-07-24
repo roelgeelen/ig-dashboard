@@ -1,0 +1,17 @@
+{
+  "name": "ig-dashboard-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lokale agent die elke 4 dagen automatisch de officiele Instagram data-export aanvraagt, ophaalt en versleuteld naar GitHub pusht.",
+  "scripts": {
+    "login": "node login.js",
+    "run": "node run.js",
+    "run:headful": "node run.js --headful",
+    "status": "node status.js",
+    "test": "node test/run-tests.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "playwright": "^1.49.0"
+  }
+}

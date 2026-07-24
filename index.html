@@ -47,12 +47,24 @@
   button.ghost { background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:12.5px; cursor:pointer; width:auto; }
   button.linklike { background:none; border:none; color:var(--pink); font-size:12px; cursor:pointer; padding:0; text-decoration:underline; width:auto; }
   .tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  /* Op een telefoon zouden negen tabs over vier regels breken en een derde van
+     het scherm opeten voordat je iets ziet. Daar wordt het een swipebare rij. */
+  @media (max-width: 640px) {
+    .tabs { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding-bottom:2px; }
+    .tabs::-webkit-scrollbar { display:none; }
+    .tab { flex:0 0 auto; }
+  }
   .tab { padding:8px 14px; border-radius:999px; font-size:12.5px; cursor:pointer; border:1px solid var(--border); background:#fff; color:var(--text); white-space:nowrap; }
   .tab.active { background:var(--text); color:#fff; border-color:var(--text); }
   .tab .count { opacity:.65; font-size:11px; margin-left:4px; }
   .tabpage { display:none; }
   .tabpage.active { display:block; }
   .empty-state { padding:30px 10px; text-align:center; color:var(--muted); font-size:13px; }
+  .agent-banner { font-size:12.5px; padding:9px 11px; border-radius:8px; margin-bottom:12px; }
+  .agent-banner.ok { background:#e6f4ea; color:#1a7f37; }
+  .agent-banner.warn { background:#fef7e0; color:#8a6116; }
+  .agent-banner.error { background:#fce8e6; color:#d93025; }
+  .agent-banner.idle { background:#eef2ff; color:#3730a3; }
   a.profile-link { color:var(--pink); text-decoration:none; font-weight:600; }
   a.profile-link:hover { text-decoration:underline; }
   details.gh-settings { font-size:12.5px; }
@@ -92,7 +104,7 @@
 
     <div class="panel">
       <h2>Naamlijsten bijwerken</h2>
-      <div class="sub">Instagram biedt geen live API voor wie je precies volgt/ontvolgt. Vraag af en toe je export aan (Instagram → Instellingen → "Je informatie downloaden" → Volgers en gevolgde accounts, HTML-formaat) en sleep de .zip hieronder — werkt ook vanaf je telefoon. De lijst wordt versleuteld opgeslagen op GitHub zodat je 'm overal ziet.</div>
+      <div class="sub">Normaal gesproken hoef je hier niets te doen: de agent op je PC vraagt elke 4 dagen automatisch een export aan en werkt de lijst bij. Dit vak is het vangnet — bijvoorbeeld als je sessie verlopen is of je tussendoor een verse meting wil. Vraag je export aan via Instagram → Instellingen → "Je informatie downloaden" → Volgers en gevolgde accounts, en sleep de .zip hieronder. Werkt ook vanaf je telefoon.</div>
 
       <div class="dropzone" id="dropzone">
         <div class="big">Sleep je export .zip hierheen, of klik om te kiezen</div>
@@ -126,14 +138,15 @@
     </div>
 
     <div class="panel">
-      <div id="namesLastUpdate" class="sub" style="margin-bottom:6px;">Nog geen naamlijst-export geüpload.</div>
+      <div class="agent-banner idle" id="agentBanner">Agent-status wordt geladen…</div>
+      <div id="namesLastUpdate" class="sub" style="margin-bottom:6px;">Nog geen naamlijst opgehaald.</div>
       <div class="cards" id="nameCards"></div>
       <div class="tabs" id="nameTabBar" style="margin-top:16px;"></div>
       <div id="nameTabPages"></div>
     </div>
   </div>
   <footer>
-    Aantallen worden dagelijks automatisch opgehaald via de officiële Instagram API. Naamlijsten worden bijgewerkt via je export-upload. Alle data is versleuteld met je passphrase.
+    Aantallen worden dagelijks automatisch opgehaald via de officiële Instagram API. Naamlijsten worden elke 4 dagen automatisch bijgewerkt door de agent op je PC — vaker staat Instagram niet toe. Alle data is versleuteld met je passphrase.
   </footer>
 </div>
 
@@ -182,7 +195,8 @@ async function igEncrypt(passphrase, obj) {
 // ---- app state ----
 let PASSPHRASE = null;
 let history = [];
-let nameSnapshots = [];
+let nameStore = null;
+let agentStatus = null;
 
 async function unlockDashboard() {
   const pass = document.getElementById('passphraseInput').value;
@@ -200,6 +214,7 @@ async function unlockDashboard() {
     document.getElementById('app').style.display = 'block';
     renderAll();
     await loadNamesFromGitHub();
+    await loadAgentStatus();
     renderNamesAll();
   } catch (e) {
     errEl.textContent = 'Onjuiste passphrase of data kon niet worden gelezen.';
@@ -291,18 +306,103 @@ function ghToken() {
   return localStorage.getItem('ig_dash_gh_token') || sessionStorage.getItem('ig_dash_gh_token_session') || '';
 }
 
+// ---- opslagformaat v2 (spiegelt agent/lib/store.js) ----
+// v1 was een array van volledige snapshots. Die groeide met ~190 KB per meting;
+// bij de automatische agent (elke 4 dagen) zou dat het dashboard binnen een jaar
+// onbruikbaar traag maken. v2 bewaart de huidige stand plus een event-log.
+
+function emptyNameStore() {
+  return { v: 2, current: null, previous: null, events: [], measurements: [] };
+}
+
+function pairUsernames(pairs) {
+  return (pairs || []).map(p => Array.isArray(p) ? p[0] : p);
+}
+
+function applyNameSnapshot(store, snap) {
+  const s = normalizeNameStore(store);
+  const date = snap.date;
+  const replacingToday = s.current && s.current.date === date;
+  const base = replacingToday ? s.previous : s.current;
+
+  const baseFollowers = base ? pairUsernames(base.followers) : [];
+  const baseFollowing = base ? pairUsernames(base.following) : [];
+  const nextFollowers = pairUsernames(snap.followers);
+  const nextFollowing = pairUsernames(snap.following);
+
+  const events = s.events.filter(e => e[0] !== date);
+  if (base) {
+    const bf = new Set(baseFollowers), nf = new Set(nextFollowers);
+    const bg = new Set(baseFollowing), ng = new Set(nextFollowing);
+    nextFollowers.forEach(u => { if (!bf.has(u)) events.push([date, u, 'f+']); });
+    baseFollowers.forEach(u => { if (!nf.has(u)) events.push([date, u, 'f-']); });
+    nextFollowing.forEach(u => { if (!bg.has(u)) events.push([date, u, 'g+']); });
+    baseFollowing.forEach(u => { if (!ng.has(u)) events.push([date, u, 'g-']); });
+  }
+
+  const measurements = s.measurements.filter(d => d !== date);
+  measurements.push(date);
+  measurements.sort();
+
+  return {
+    v: 2,
+    current: {
+      date,
+      followers: snap.followers,
+      following: snap.following,
+      pending: snap.pending || [],
+      recentRequests: snap.recentRequests || [],
+      recentlyUnfollowed: snap.recentlyUnfollowed || [],
+    },
+    previous: base ? { date: base.date, followers: baseFollowers, following: baseFollowing } : null,
+    events,
+    measurements,
+  };
+}
+
+function normalizeNameStore(raw) {
+  if (!raw) return emptyNameStore();
+  if (Array.isArray(raw)) {
+    // Oude v1-data uit een eerdere upload: eenmalig omzetten.
+    let s = emptyNameStore();
+    for (const snap of raw) s = applyNameSnapshot(s, snap);
+    return s;
+  }
+  if (raw.v === 2) {
+    return {
+      v: 2,
+      current: raw.current || null,
+      previous: raw.previous || null,
+      events: raw.events || [],
+      measurements: raw.measurements || [],
+    };
+  }
+  return emptyNameStore();
+}
+
 async function loadNamesFromGitHub() {
   try {
     const res = await fetch('data/names.enc.json', { cache: 'no-store' });
-    if (!res.ok) { nameSnapshots = []; return; }
+    if (!res.ok) { nameStore = emptyNameStore(); return; }
     const blob = await res.json();
-    nameSnapshots = await igDecrypt(PASSPHRASE, blob.data);
+    nameStore = normalizeNameStore(await igDecrypt(PASSPHRASE, blob.data));
   } catch (e) {
-    nameSnapshots = [];
+    nameStore = emptyNameStore();
   }
 }
 
-async function pushNamesToGitHub(snapshotsArr) {
+async function loadAgentStatus() {
+  try {
+    const res = await fetch('data/agent-status.enc.json', { cache: 'no-store' });
+    if (!res.ok) { agentStatus = null; return; }
+    const blob = await res.json();
+    agentStatus = await igDecrypt(PASSPHRASE, blob.data);
+  } catch (e) {
+    agentStatus = null;
+  }
+}
+
+async function pushNamesToGitHub(storeObj) {
   const token = ghToken();
   if (!token) throw new Error('Geen GitHub-token ingesteld. Vul deze in bij "GitHub-instellingen" hierboven.');
   const owner = 'roelgeelen', repo = 'ig-dashboard', path = 'data/names.enc.json';
@@ -311,7 +411,7 @@ async function pushNamesToGitHub(snapshotsArr) {
   const getRes = await fetch(apiUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } });
   if (getRes.ok) { const j = await getRes.json(); sha = j.sha; }
   else if (getRes.status !== 404) { throw new Error('Kon huidige bestand niet controleren (status ' + getRes.status + ')'); }
-  const cipherB64 = await igEncrypt(PASSPHRASE, snapshotsArr);
+  const cipherB64 = await igEncrypt(PASSPHRASE, storeObj);
   const fileText = JSON.stringify({ v: 1, data: cipherB64 }, null, 2) + '\n';
   const contentB64 = btoa(unescape(encodeURIComponent(fileText)));
   const body = { message: 'Naamlijst bijgewerkt via dashboard-upload', content: contentB64, branch: 'main' };
@@ -337,9 +437,9 @@ function toSet(pairs) { return new Set(pairs.map(p => p[0])); }
 function toMap(pairs) { const m = new Map(); pairs.forEach(p => m.set(p[0], p[1])); return m; }
 
 function diffAllNames() {
-  if (!nameSnapshots.length) return null;
-  const latest = nameSnapshots[nameSnapshots.length - 1];
-  const prev = nameSnapshots.length > 1 ? nameSnapshots[nameSnapshots.length - 2] : null;
+  const s = normalizeNameStore(nameStore);
+  if (!s.current) return null;
+  const latest = s.current;
 
   const curFollowers = toSet(latest.followers);
   const curFollowing = toSet(latest.following);
@@ -350,24 +450,37 @@ function diffAllNames() {
   const fans = [...curFollowers].filter(u => !curFollowing.has(u));
   const mutuals = [...curFollowers].filter(u => curFollowing.has(u));
 
-  let newFollowers = [], lostFollowers = [], newFollowing = [], unfollowedByYou = [];
-  if (prev) {
-    const prevFollowers = toSet(prev.followers);
-    const prevFollowing = toSet(prev.following);
-    newFollowers = [...curFollowers].filter(u => !prevFollowers.has(u));
-    lostFollowers = [...prevFollowers].filter(u => !curFollowers.has(u));
-    newFollowing = [...curFollowing].filter(u => !prevFollowing.has(u));
-    unfollowedByYou = [...prevFollowing].filter(u => !curFollowing.has(u));
-  }
+  // Wijzigingen sinds de vorige meting lezen we rechtstreeks uit de event-log
+  // van de laatste meetdatum; twee lijsten van duizenden namen vergelijken
+  // hoeft daardoor niet meer.
+  const onLatest = t => s.events.filter(e => e[0] === latest.date && e[2] === t).map(e => e[1]);
+
+  const timeline = s.events
+    .slice()
+    .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : b[0].localeCompare(a[0])))
+    .map(e => [e[1], EVENT_LABELS[e[2]] || e[2], e[0]]);
 
   return {
-    latest, prev,
+    latest,
+    measurements: s.measurements,
     counts: { followers: curFollowers.size, following: curFollowing.size, notFollowingBack: notFollowingBack.length, fans: fans.length, mutuals: mutuals.length },
-    notFollowingBack, fans, mutuals, newFollowers, lostFollowers, newFollowing, unfollowedByYou,
+    notFollowingBack, fans, mutuals,
+    newFollowers: onLatest('f+'),
+    lostFollowers: onLatest('f-'),
+    newFollowing: onLatest('g+'),
+    unfollowedByYou: onLatest('g-'),
+    timeline,
     followingSince, followersSince,
     pending: latest.pending || [], recentRequests: latest.recentRequests || [], recentlyUnfollowed: latest.recentlyUnfollowed || [],
   };
 }
+
+const EVENT_LABELS = {
+  'f+': 'Ging jou volgen',
+  'f-': 'Ontvolgde jou',
+  'g+': 'Jij ging volgen',
+  'g-': 'Jij ontvolgde',
+};
 
 function renderNameCards(d) {
   const el = document.getElementById('nameCards');
@@ -419,6 +532,20 @@ function renderRequestGrid(containerId, list, tsLabel) {
   }).render(el);
 }
 
+function renderTimelineGrid(containerId, list) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  if (!list || list.length === 0) { el.innerHTML = '<div class="empty-state">Nog geen wijzigingen vastgelegd. Vanaf de tweede meting verschijnt hier wie er kwam en ging.</div>'; return; }
+  new gridjs.Grid({
+    columns: [
+      { name: 'Account', formatter: (cell) => gridjs.html(profileCell(cell)) },
+      { name: 'Wat' },
+      { name: 'Wanneer' },
+    ],
+    data: list, search: true, sort: true, pagination: { limit: 25 },
+  }).render(el);
+}
+
 function renderNameTabs(d) {
   const barEl = document.getElementById('nameTabBar');
   const pagesEl = document.getElementById('nameTabPages');
@@ -436,6 +563,7 @@ function renderNameTabs(d) {
     { id: 'pending', label: 'Wachtende volgverzoeken', count: d.pending.length, kind: 'request', data: d.pending, tsLabel: 'Verzoek verstuurd' },
     { id: 'recentRequests', label: 'Ontvangen volgverzoeken', count: d.recentRequests.length, kind: 'request', data: d.recentRequests, tsLabel: 'Ontvangen' },
     { id: 'recentlyUnfollowed', label: 'Recent ontvolgd (IG-log)', count: d.recentlyUnfollowed.length, kind: 'request', data: d.recentlyUnfollowed, tsLabel: 'Ontvolgd op' },
+    { id: 'timeline', label: 'Tijdlijn', count: d.timeline.length, kind: 'timeline', data: d.timeline },
   ];
 
   barEl.innerHTML = tabs.map((t, i) => `<div class="tab ${i === 0 ? 'active' : ''}" data-tab="${t.id}">${t.label} <span class="count">${t.count}</span></div>`).join('');
@@ -452,6 +580,7 @@ function renderNameTabs(d) {
 
   tabs.forEach(t => {
     if (t.kind === 'grid') renderGrid('npage-' + t.id, t.data, t.since, t.sinceLabel);
+    else if (t.kind === 'timeline') renderTimelineGrid('npage-' + t.id, t.data);
     else renderRequestGrid('npage-' + t.id, t.data, t.tsLabel);
   });
 }
@@ -461,9 +590,44 @@ function renderNamesAll() {
   renderNameCards(d);
   renderNameTabs(d);
   const infoEl = document.getElementById('namesLastUpdate');
-  infoEl.textContent = nameSnapshots.length
-    ? `Laatste naamlijst-update: ${nameSnapshots[nameSnapshots.length - 1].date} · ${nameSnapshots.length} export${nameSnapshots.length === 1 ? '' : 's'} verwerkt`
-    : 'Nog geen naamlijst-export geüpload.';
+  const s = normalizeNameStore(nameStore);
+  infoEl.textContent = s.current
+    ? `Laatste naamlijst-update: ${s.current.date} · ${s.measurements.length} meting${s.measurements.length === 1 ? '' : 'en'} verwerkt`
+    : 'Nog geen naamlijst opgehaald.';
+  renderAgentBanner();
+}
+
+// Laat zien of de lokale agent nog draait. Zonder dit merk je pas weken later
+// dat je Instagram-sessie is verlopen en de namen stil zijn blijven staan.
+function renderAgentBanner() {
+  const el = document.getElementById('agentBanner');
+  if (!el) return;
+  if (!agentStatus) {
+    el.className = 'agent-banner idle';
+    el.textContent = 'Automatische agent nog niet actief. Zie agent/README.md om hem in te richten, of upload hieronder handmatig een export.';
+    return;
+  }
+
+  const daysSinceRun = agentStatus.lastRunAt
+    ? Math.floor((Date.now() - Date.parse(agentStatus.lastRunAt)) / 86400000)
+    : null;
+
+  if (!agentStatus.sessionValid) {
+    el.className = 'agent-banner error';
+    el.textContent = 'Instagram-sessie verlopen. Draai op je PC "npm run login" in de map agent/ om opnieuw in te loggen — tot die tijd worden de namen niet bijgewerkt.';
+  } else if (daysSinceRun !== null && daysSinceRun >= 3) {
+    el.className = 'agent-banner warn';
+    el.textContent = `Agent heeft ${daysSinceRun} dagen niet gedraaid. Stond je PC uit, of is de geplande taak gestopt?`;
+  } else if (agentStatus.lastError) {
+    el.className = 'agent-banner warn';
+    el.textContent = 'Laatste agent-run gaf een fout: ' + agentStatus.lastError;
+  } else if (agentStatus.phase === 'PENDING') {
+    el.className = 'agent-banner idle';
+    el.textContent = 'Export aangevraagd bij Instagram, wachten tot hij klaarstaat. De agent haalt hem automatisch op zodra dat zo is.';
+  } else {
+    el.className = 'agent-banner ok';
+    el.textContent = `Agent draait. Laatste succesvolle export: ${agentStatus.lastSuccessDate || '—'}.`;
+  }
 }
 
 async function commitNameSnapshot(parsed, sourceLabel) {
@@ -472,18 +636,18 @@ async function commitNameSnapshot(parsed, sourceLabel) {
     return;
   }
   const today = new Date().toISOString().slice(0, 10);
-  const newSnapshots = nameSnapshots.slice();
   const entry = {
     date: today, followers: parsed.followers, following: parsed.following,
     pending: parsed.pending || [], recentRequests: parsed.recentRequests || [], recentlyUnfollowed: parsed.recentlyUnfollowed || [],
   };
-  const idx = newSnapshots.findIndex(s => s.date === today);
-  if (idx >= 0) newSnapshots[idx] = entry; else newSnapshots.push(entry);
+  // Zelfde opbouw als de agent, zodat handmatige en automatische metingen door
+  // elkaar heen kunnen lopen zonder de event-log te ontregelen.
+  const nextStore = applyNameSnapshot(nameStore, entry);
 
   setNamesStatus('Opslaan naar GitHub...', 'info');
   try {
-    await pushNamesToGitHub(newSnapshots);
-    nameSnapshots = newSnapshots;
+    await pushNamesToGitHub(nextStore);
+    nameStore = nextStore;
     setNamesStatus(`Naamlijst bijgewerkt (${today}): ${parsed.followers.length} volgers, ${parsed.following.length} volgend. Opgeslagen op GitHub.`, 'success');
     renderNamesAll();
   } catch (err) {

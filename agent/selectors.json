@@ -1,0 +1,73 @@
+{
+  "_comment": "Tekstlabels waarop de agent klikt in het Meta Accounts Center. Meta wijzigt deze regelmatig en vertaalt ze per taalinstelling. Werkt een stap niet meer, kijk dan in agent/debug/ naar de screenshot van die stap en vul hier het juiste label aan. Code aanpassen is niet nodig.",
+
+  "dyiUrl": "https://accountscenter.instagram.com/info_and_permissions/dyi/",
+
+  "loggedOutMarkers": [
+    "Log in",
+    "Inloggen",
+    "Wachtwoord",
+    "Password"
+  ],
+
+  "steps": {
+    "downloadOrTransfer": [
+      "Informatie downloaden of overzetten",
+      "Download or transfer information",
+      "Je informatie downloaden",
+      "Download your information"
+    ],
+    "someOfYourInformation": [
+      "Bepaalde informatie",
+      "Some of your information",
+      "Bepaalde van je informatie"
+    ],
+    "followersAndFollowing": [
+      "Volgers en gevolgde accounts",
+      "Followers and following",
+      "Volgers en accounts die je volgt"
+    ],
+    "next": [
+      "Volgende",
+      "Next",
+      "Doorgaan",
+      "Continue"
+    ],
+    "downloadToDevice": [
+      "Downloaden naar apparaat",
+      "Download to device"
+    ],
+    "dateRange": [
+      "Datumbereik",
+      "Date range"
+    ],
+    "allTime": [
+      "Altijd",
+      "All time",
+      "Alle tijd"
+    ],
+    "format": [
+      "Notatie",
+      "Format",
+      "Indeling"
+    ],
+    "json": [
+      "JSON"
+    ],
+    "save": [
+      "Opslaan",
+      "Save"
+    ],
+    "createFiles": [
+      "Bestanden maken",
+      "Create files",
+      "Bestanden aanmaken",
+      "Verzoek indienen",
+      "Submit request"
+    ],
+    "downloadReady": [
+      "Downloaden",
+      "Download"
+    ]
+  }
+}
