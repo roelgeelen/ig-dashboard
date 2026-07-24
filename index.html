@@ -65,6 +65,7 @@
   .agent-banner.warn { background:#fef7e0; color:#8a6116; }
   .agent-banner.error { background:#fce8e6; color:#d93025; }
   .agent-banner.idle { background:#eef2ff; color:#3730a3; }
+  .tab-note { background:#fef7e0; color:#8a6116; padding:9px 11px; border-radius:8px; margin-bottom:12px; }
   a.profile-link { color:var(--pink); text-decoration:none; font-weight:600; }
   a.profile-link:hover { text-decoration:underline; }
   details.gh-settings { font-size:12.5px; }
@@ -436,6 +437,29 @@ function setNamesStatus(msg, kind) {
 function toSet(pairs) { return new Set(pairs.map(p => p[0])); }
 function toMap(pairs) { const m = new Map(); pairs.forEach(p => m.set(p[0], p[1])); return m; }
 
+// De export levert datums als "jul 23, 2026 11:55 pm" (HTML) of "2026-07-23"
+// (JSON, wat de agent aanvraagt). Beide moeten hier doorheen kunnen.
+function parseExportDate(s) {
+  if (!s || s === '—') return null;
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : String(s).replace(/(am|pm)$/i, m => ' ' + m);
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Instagram kapt de volgersgeschiedenis in de export af: bij dit account begon
+// de volgerslijst pas 8 maanden terug, terwijl de volglijst 5 jaar teruggaat.
+// Wie jou vóór die grens is gaan volgen ontbreekt, en verschijnt dus ten
+// onrechte als "volgt niet terug". We kunnen ze niet terughalen, maar we kunnen
+// wel ophouden er stellige uitspraken over te doen.
+function followersCutoff(followers) {
+  let oldest = null;
+  for (const [, since] of followers || []) {
+    const d = parseExportDate(since);
+    if (d && (!oldest || d < oldest)) oldest = d;
+  }
+  return oldest;
+}
+
 function diffAllNames() {
   const s = normalizeNameStore(nameStore);
   if (!s.current) return null;
@@ -450,6 +474,20 @@ function diffAllNames() {
   const fans = [...curFollowers].filter(u => !curFollowing.has(u));
   const mutuals = [...curFollowers].filter(u => curFollowing.has(u));
 
+  // Volgde jij iemand al vóór het begin van de volgerslijst, dan kan de export
+  // niet laten zien of die persoon jou terugvolgt. Zulke gevallen apart houden
+  // in plaats van ze bij "volgt niet terug" te gooien.
+  const cutoff = followersCutoff(latest.followers);
+  const unverifiable = new Set();
+  if (cutoff) {
+    for (const u of notFollowingBack) {
+      const d = parseExportDate(followingSince.get(u));
+      if (d && d < cutoff) unverifiable.add(u);
+    }
+  }
+  const notFollowingBackSure = notFollowingBack.filter(u => !unverifiable.has(u));
+  const notFollowingBackUnsure = notFollowingBack.filter(u => unverifiable.has(u));
+
   // Wijzigingen sinds de vorige meting lezen we rechtstreeks uit de event-log
   // van de laatste meetdatum; twee lijsten van duizenden namen vergelijken
   // hoeft daardoor niet meer.
@@ -463,8 +501,8 @@ function diffAllNames() {
   return {
     latest,
     measurements: s.measurements,
-    counts: { followers: curFollowers.size, following: curFollowing.size, notFollowingBack: notFollowingBack.length, fans: fans.length, mutuals: mutuals.length },
-    notFollowingBack, fans, mutuals,
+    counts: { followers: curFollowers.size, following: curFollowing.size, notFollowingBack: notFollowingBackSure.length, fans: fans.length, mutuals: mutuals.length },
+    notFollowingBack: notFollowingBackSure, notFollowingBackUnsure, cutoff, fans, mutuals,
     newFollowers: onLatest('f+'),
     lostFollowers: onLatest('f-'),
     newFollowing: onLatest('g+'),
@@ -557,17 +595,24 @@ function renderNameTabs(d) {
   const tabs = [
     { id: 'newFollowers', label: 'Nieuwe volgers', count: d.newFollowers.length, kind: 'grid', data: d.newFollowers, since: d.followersSince, sinceLabel: 'Volgt sinds' },
     { id: 'lostFollowers', label: 'Ontvolgd door', count: d.lostFollowers.length, kind: 'grid', data: d.lostFollowers, since: null, sinceLabel: 'Status' },
-    { id: 'notFollowingBack', label: 'Jij volgt, geen terugvolg', count: d.notFollowingBack.length, kind: 'grid', data: d.notFollowingBack, since: d.followingSince, sinceLabel: 'Jij volgt sinds' },
+    { id: 'notFollowingBack', label: 'Jij volgt, geen terugvolg', count: d.notFollowingBack.length, kind: 'grid', data: d.notFollowingBack, since: d.followingSince, sinceLabel: 'Jij volgt sinds',
+      note: d.notFollowingBackUnsure.length
+        ? `${d.notFollowingBackUnsure.length} account${d.notFollowingBackUnsure.length === 1 ? ' staat' : 's staan'} hier niet bij, omdat je ze al volgde voordat je volgerslijst begint — zie de tab "Niet te zeggen".`
+        : null },
     { id: 'fans', label: 'Fans zonder terugvolg', count: d.fans.length, kind: 'grid', data: d.fans, since: d.followersSince, sinceLabel: 'Volgt jou sinds' },
     { id: 'unfollowedByYou', label: 'Jij hebt ontvolgd', count: d.unfollowedByYou.length, kind: 'grid', data: d.unfollowedByYou, since: null, sinceLabel: 'Status' },
     { id: 'pending', label: 'Wachtende volgverzoeken', count: d.pending.length, kind: 'request', data: d.pending, tsLabel: 'Verzoek verstuurd' },
     { id: 'recentRequests', label: 'Ontvangen volgverzoeken', count: d.recentRequests.length, kind: 'request', data: d.recentRequests, tsLabel: 'Ontvangen' },
     { id: 'recentlyUnfollowed', label: 'Recent ontvolgd (IG-log)', count: d.recentlyUnfollowed.length, kind: 'request', data: d.recentlyUnfollowed, tsLabel: 'Ontvolgd op' },
     { id: 'timeline', label: 'Tijdlijn', count: d.timeline.length, kind: 'timeline', data: d.timeline },
+    { id: 'unsure', label: 'Niet te zeggen', count: d.notFollowingBackUnsure.length, kind: 'grid', data: d.notFollowingBackUnsure, since: d.followingSince, sinceLabel: 'Jij volgt sinds',
+      note: d.cutoff
+        ? `Deze accounts volgde je al vóór ${d.cutoff.toLocaleDateString('nl-NL')}, en zo ver gaat je volgerslijst uit de export niet terug. Of ze je terugvolgen is dus niet te zien — ze stonden eerder ten onrechte bij "volgt niet terug".`
+        : 'Van deze accounts is niet vast te stellen of ze je terugvolgen.' },
   ];
 
   barEl.innerHTML = tabs.map((t, i) => `<div class="tab ${i === 0 ? 'active' : ''}" data-tab="${t.id}">${t.label} <span class="count">${t.count}</span></div>`).join('');
-  pagesEl.innerHTML = tabs.map((t, i) => `<div class="tabpage ${i === 0 ? 'active' : ''}" id="npage-${t.id}"></div>`).join('');
+  pagesEl.innerHTML = tabs.map((t, i) => `<div class="tabpage ${i === 0 ? 'active' : ''}" id="npage-${t.id}">${t.note ? `<div class="sub tab-note">${t.note}</div>` : ''}<div id="ngrid-${t.id}"></div></div>`).join('');
 
   barEl.querySelectorAll('.tab').forEach(tabEl => {
     tabEl.addEventListener('click', () => {
@@ -579,9 +624,9 @@ function renderNameTabs(d) {
   });
 
   tabs.forEach(t => {
-    if (t.kind === 'grid') renderGrid('npage-' + t.id, t.data, t.since, t.sinceLabel);
-    else if (t.kind === 'timeline') renderTimelineGrid('npage-' + t.id, t.data);
-    else renderRequestGrid('npage-' + t.id, t.data, t.tsLabel);
+    if (t.kind === 'grid') renderGrid('ngrid-' + t.id, t.data, t.since, t.sinceLabel);
+    else if (t.kind === 'timeline') renderTimelineGrid('ngrid-' + t.id, t.data);
+    else renderRequestGrid('ngrid-' + t.id, t.data, t.tsLabel);
   });
 }
 
