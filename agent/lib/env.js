@@ -44,6 +44,9 @@ function load() {
     githubToken:
       process.env.GITHUB_TOKEN || fromFile.GITHUB_TOKEN || githubTokenFromCli(),
     intervalDays: Number(process.env.EXPORT_INTERVAL_DAYS || fromFile.EXPORT_INTERVAL_DAYS || 4),
+    // Het Accountcentrum vraagt om een profiel zodra er meerdere accounts aan
+    // hangen, en dan moet de agent weten welke van jou het dashboard voedt.
+    username: process.env.IG_USERNAME || fromFile.IG_USERNAME || '',
   };
 
   const missing = [];

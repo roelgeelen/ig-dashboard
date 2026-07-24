@@ -100,22 +100,22 @@ async function main() {
   // ---- 1. GitHub ----
   const token = ghToken();
   if (token) {
-    say('  [1/4] GitHub      : ingelogd via de gh CLI, geen token nodig.');
+    say('  [1/5] GitHub      : ingelogd via de gh CLI, geen token nodig.');
   } else {
-    say('  [1/4] GitHub      : gh CLI niet ingelogd.');
+    say('  [1/5] GitHub      : gh CLI niet ingelogd.');
     say('        Draai eerst "gh auth login" en start dit script opnieuw.');
     process.exit(1);
   }
 
   // ---- 2. Passphrase ----
   if (!fs.existsSync(HISTORY_FILE)) {
-    say('  [2/4] Passphrase  : data/history.enc.json ontbreekt, kan niet controleren.');
+    say('  [2/5] Passphrase  : data/history.enc.json ontbreekt, kan niet controleren.');
     process.exit(1);
   }
 
   let passphrase = '';
   for (let poging = 1; poging <= 3; poging++) {
-    passphrase = await askHidden('  [2/4] Passphrase  : ');
+    passphrase = await askHidden('  [2/5] Passphrase  : ');
     if (!passphrase) {
       say('        Niets ingevuld.');
       continue;
@@ -137,11 +137,16 @@ async function main() {
   if (existing && !/^\s*$/.test(existing)) {
     fs.writeFileSync(ENV_FILE + '.bak', existing);
   }
+  // Het Accountcentrum vraagt om een profiel zodra er meerdere accounts aan je
+  // Meta-account hangen, dus de agent moet weten welke hij moet hebben.
+  const username = await ask('  [3/5] Instagram   : gebruikersnaam die het dashboard volgt: ');
+
   fs.writeFileSync(
     ENV_FILE,
     [
       '# Aangemaakt door setup.js. Staat in .gitignore.',
       `ENCRYPTION_PASSPHRASE=${passphrase}`,
+      `IG_USERNAME=${username}`,
       '# GITHUB_TOKEN wordt automatisch opgehaald via de gh CLI.',
       'EXPORT_INTERVAL_DAYS=4',
       '',
@@ -153,7 +158,7 @@ async function main() {
   const zip = findExportZip();
   if (zip) {
     say('');
-    say('  [3/4] Basismeting : export gevonden - ' + path.basename(zip));
+    say('  [4/5] Basismeting : export gevonden - ' + path.basename(zip));
     const antwoord = await ask('        Nu inlezen zodat je meteen namen ziet? [J/n] ');
     if (!/^n/i.test(antwoord)) {
       try {
@@ -166,12 +171,12 @@ async function main() {
     }
   } else {
     say('');
-    say('  [3/4] Basismeting : geen export-zip gevonden in de map exports/, overgeslagen.');
+    say('  [4/5] Basismeting : geen export-zip gevonden in de map exports/, overgeslagen.');
   }
 
   // ---- 4. Geplande taak ----
   say('');
-  const antwoord = await ask('  [4/4] Dagelijkse taak in Windows Taakplanner zetten? [J/n] ');
+  const antwoord = await ask('  [5/5] Dagelijkse taak in Windows Taakplanner zetten? [J/n] ');
   if (!/^n/i.test(antwoord)) {
     try {
       execSync('powershell -ExecutionPolicy Bypass -File install-task.ps1', { cwd: AGENT_DIR, stdio: 'inherit' });

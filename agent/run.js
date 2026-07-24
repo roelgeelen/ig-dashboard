@@ -23,6 +23,10 @@ const PENDING_GIVE_UP_DAYS = 14;
 
 const headful = process.argv.includes('--headful');
 const force = process.argv.includes('--force');
+// Loopt de wizard helemaal door maar stopt vlak voor "Export starten", zodat je
+// de knoppen kunt controleren zonder je limiet van een export per vier dagen op
+// te maken.
+const dryRun = process.argv.includes('--dry-run');
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -129,11 +133,15 @@ async function main() {
         log.info('Export nog in behandeling bij Instagram. Volgende run kijkt opnieuw.');
       }
     } else {
-      await requestExport(page);
-      s.phase = state.PENDING;
-      s.requestedAt = new Date().toISOString();
-      s.lastError = null;
-      s.consecutiveFailures = 0;
+      const submitted = await requestExport(page, { username: cfg.username, dryRun });
+      if (submitted) {
+        s.phase = state.PENDING;
+        s.requestedAt = new Date().toISOString();
+        s.lastError = null;
+        s.consecutiveFailures = 0;
+      } else {
+        log.info('Droogloop: er is niets aangevraagd, de fase blijft ongewijzigd.');
+      }
     }
     s.sessionValid = true;
   } catch (err) {

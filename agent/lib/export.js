@@ -1,8 +1,14 @@
-// Bedient het Meta Accounts Center: export aanvragen, status checken, ophalen.
+// Bedient het Meta Accountcentrum: export aanvragen, status checken, ophalen.
 //
-// Dit is het enige deel dat afhangt van Meta's UI. Alle labels staan in
-// selectors.json en elke stap maakt bij een fout een screenshot in agent/debug/,
-// zodat je precies ziet waar het misging en welk label je moet aanvullen.
+// De flow is vastgesteld door hem op 2026-07-24 daadwerkelijk door te lopen:
+//
+//   Beschikbare downloads -> Export maken -> Profielen -> <jouw account>
+//   -> Kiezen waarnaar je wilt exporteren -> Exporteren naar apparaat
+//   -> Je export bevestigen -> [instellingen bijstellen] -> Export starten
+//
+// Dit is het enige deel dat van Meta's UI afhangt. Alle labels staan in
+// selectors.json en elke mislukte stap laat een screenshot achter in
+// agent/debug/, zodat je ziet waar het misging.
 
 const fs = require('fs');
 const path = require('path');
@@ -11,137 +17,255 @@ const log = require('./log');
 
 const selectors = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'selectors.json'), 'utf8'));
 
-const STEP_TIMEOUT = 20000;
+const SETTLE_MS = 3000;
 
-// Probeert de labelvarianten op volgorde: eerst als knop/link met die naam,
-// daarna als losse tekst. Geeft de eerste die zichtbaar wordt.
-async function findByLabels(page, labels, { timeout = STEP_TIMEOUT } = {}) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    for (const label of labels) {
-      for (const locator of [
-        page.getByRole('button', { name: label, exact: false }),
-        page.getByRole('link', { name: label, exact: false }),
-        page.getByRole('checkbox', { name: label, exact: false }),
-        page.getByRole('radio', { name: label, exact: false }),
-        page.getByText(label, { exact: false }),
-      ]) {
-        const first = locator.first();
-        if (await first.isVisible().catch(() => false)) return first;
-      }
-    }
-    await page.waitForTimeout(500);
-  }
-  return null;
-}
-
-async function clickStep(page, stepName, { optional = false } = {}) {
+function labelsFor(stepName) {
   const labels = selectors.steps[stepName];
   if (!labels) throw new Error(`Onbekende stap in selectors.json: ${stepName}`);
+  return labels;
+}
 
-  const target = await findByLabels(page, labels);
-  if (!target) {
-    if (optional) {
-      log.info(`Stap "${stepName}" niet gevonden, overgeslagen (optioneel).`);
-      return false;
+// Klikt alleen echte klikbare elementen, en het kleinste dat past. Zoeken op
+// losse tekst pakt op deze pagina de uitleg-alinea in plaats van de knop.
+async function clickLabels(page, labels) {
+  const handle = await page.evaluateHandle((wanted) => {
+    const vis = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const cands = [
+      ...document.querySelectorAll('[role=button],button,a,[role=link],[role=radio],[role=checkbox],[role=menuitem],[role=tab],label'),
+    ].filter(vis);
+    const shortest = (list) => list.sort((a, b) => norm(a.innerText).length - norm(b.innerText).length)[0];
+
+    for (const label of wanted) {
+      const t = norm(label);
+      const exact = cands.filter((el) => norm(el.innerText) === t);
+      if (exact.length) return shortest(exact);
     }
-    const shot = await screenshot(page, `fail-${stepName}`);
-    throw new Error(
-      `Kon stap "${stepName}" niet vinden. Gezocht op: ${labels.join(' | ')}. ` +
-        (shot ? `Screenshot: ${shot}` : 'Screenshot maken lukte niet.')
-    );
-  }
+    for (const label of wanted) {
+      const t = norm(label);
+      const partial = cands.filter((el) => norm(el.innerText).includes(t));
+      if (partial.length) return shortest(partial);
+    }
+    return null;
+  }, labels);
 
-  await target.scrollIntoViewIfNeeded().catch(() => {});
-  await target.click({ timeout: STEP_TIMEOUT });
-  await page.waitForTimeout(1500);
-  log.info(`Stap "${stepName}" uitgevoerd.`);
+  const el = handle.asElement();
+  if (!el) return false;
+  await el.scrollIntoViewIfNeeded().catch(() => {});
+  await el.click({ timeout: 15000 }).catch(async () => {
+    await el.evaluate((n) => n.click());
+  });
+  await page.waitForTimeout(SETTLE_MS);
   return true;
 }
 
+async function clickStep(page, stepName, { optional = false } = {}) {
+  const labels = labelsFor(stepName);
+  const ok = await clickLabels(page, labels);
+  if (ok) {
+    log.info(`Stap "${stepName}" uitgevoerd.`);
+    return true;
+  }
+  if (optional) {
+    log.info(`Stap "${stepName}" niet gevonden, overgeslagen (optioneel).`);
+    return false;
+  }
+  const shot = await screenshot(page, `fail-${stepName}`);
+  throw new Error(
+    `Kon stap "${stepName}" niet vinden. Gezocht op: ${labels.join(' | ')}. ` +
+      (shot ? `Screenshot: ${shot}` : 'Screenshot maken lukte niet.')
+  );
+}
+
+// De laatste zichtbare kop verraadt op welk wizardscherm we staan.
+async function currentHeading(page) {
+  return page.evaluate(() => {
+    const vis = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const hs = [...document.querySelectorAll('h1,h2,h3,[role=heading]')].filter(vis).map((e) => e.innerText.trim());
+    return hs[hs.length - 1] || '';
+  });
+}
+
+function headingMatches(heading, key) {
+  const want = selectors.headings[key] || [];
+  const h = (heading || '').toLowerCase();
+  return want.some((w) => h.includes(w.toLowerCase()));
+}
+
 async function assertLoggedIn(page) {
-  if (/\/(login|accounts\/login)/i.test(page.url())) {
+  if (/\/(login|accounts\/login)/i.test(page.url())) throw new SessionExpiredError();
+  if ((await page.locator('input[type=password]').count()) > 0) {
+    await screenshot(page, 'session-expired');
     throw new SessionExpiredError();
   }
-  for (const marker of selectors.loggedOutMarkers) {
-    const el = page.getByText(marker, { exact: false }).first();
-    if (await el.isVisible().catch(() => false)) {
-      await screenshot(page, 'session-expired');
-      throw new SessionExpiredError();
-    }
-  }
 }
 
+// De wizard onthoudt waar je gebleven was, dus altijd opnieuw laden voordat we
+// beginnen. Anders klikt de agent verder in een half afgemaakte vorige poging.
 async function gotoDyi(page) {
-  await page.goto(selectors.dyiUrl, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2500);
+  await page.goto(selectors.dyiUrl, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
+  await page.waitForTimeout(SETTLE_MS);
   await assertLoggedIn(page);
+  return currentHeading(page);
 }
 
-// Vraagt een nieuwe export aan van alleen volgers en gevolgde accounts, in JSON.
-// Door alleen dat onderdeel te kiezen blijft de zip kilobytes groot en is hij
-// meestal binnen enkele minuten klaar in plaats van uren.
-async function requestExport(page) {
-  await gotoDyi(page);
+// Zet de categorie-vinkjes op precies een gewenste stand.
+//
+// Het categoriescherm heeft 38 vakjes die standaard allemaal aan staan. Blind
+// op "Volgers en volgend" klikken zet dat vinkje dus juist UIT. En "Alles
+// wissen" bleek de selectie niet blijvend te legen. Daarom per vakje de stand
+// vergelijken en alleen klikken waar die niet klopt - dat is meteen idempotent.
+async function setDataSelection(page, keepLabels) {
+  const result = await page.evaluate((wanted) => {
+    const vis = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const boxes = [...document.querySelectorAll('input[type=checkbox],[role=checkbox]')].filter(vis);
 
-  await clickStep(page, 'downloadOrTransfer');
-  await clickStep(page, 'someOfYourInformation', { optional: true });
-  await clickStep(page, 'followersAndFollowing');
-  await clickStep(page, 'next');
-  await clickStep(page, 'downloadToDevice', { optional: true });
-  await clickStep(page, 'next', { optional: true });
+    const labelOf = (box) => {
+      let label = norm(box.getAttribute('aria-label') || '');
+      let el = box;
+      for (let i = 0; i < 6 && el && !label; i++) {
+        el = el.parentElement;
+        if (el) {
+          const t = norm(el.innerText);
+          if (t && t.length < 70) label = t;
+        }
+      }
+      return label;
+    };
 
-  // Datumbereik en notatie zitten achter een instellingenpaneel dat Meta
-  // regelmatig verplaatst. Lukt het niet, dan is de standaard (alle data, HTML)
-  // ook bruikbaar - de parser leest beide formaten.
+    const isChecked = (box) =>
+      box.tagName === 'INPUT' ? box.checked : box.getAttribute('aria-checked') === 'true';
+
+    const want = wanted.map((w) => w.toLowerCase());
+    const changed = [];
+    const kept = [];
+
+    for (const box of boxes) {
+      const label = labelOf(box);
+      const shouldKeep = want.some((w) => label.toLowerCase().includes(w));
+      if (shouldKeep) kept.push(label);
+      if (isChecked(box) !== shouldKeep) {
+        box.click();
+        changed.push((shouldKeep ? '+' : '-') + label);
+      }
+    }
+    return { total: boxes.length, kept, changed: changed.length };
+  }, keepLabels);
+
+  return result;
+}
+
+// Beperkt de export tot volgers en gevolgde accounts. Zonder dit levert Meta
+// alles op: bij dit account was dat 195 MB met alle media, en dat duurt uren in
+// plaats van minuten. Mislukt het bijstellen, dan gaat de export gewoon door -
+// de parser leest zowel JSON als HTML, dus het resultaat klopt hoe dan ook.
+async function narrowScope(page) {
+  if (await clickStep(page, 'adjustData', { optional: true })) {
+    const sel = await setDataSelection(page, labelsFor('followersAndFollowing'));
+    if (!sel.kept.length) {
+      const shot = await screenshot(page, 'fail-followersAndFollowing');
+      log.warn(
+        `Kon "Volgers en volgend" niet aanvinken tussen ${sel.total} categorieen; ` +
+          `export wordt groter dan nodig. Screenshot: ${shot}`
+      );
+    } else {
+      log.info(`Categorieen: ${sel.total} gevonden, behouden: ${sel.kept.join(', ')} (${sel.changed} vakjes omgezet).`);
+    }
+    await page.waitForTimeout(1000);
+    await clickStep(page, 'save', { optional: true });
+  }
+
   if (await clickStep(page, 'dateRange', { optional: true })) {
     await clickStep(page, 'allTime', { optional: true });
     await clickStep(page, 'save', { optional: true });
   }
+
   if (await clickStep(page, 'format', { optional: true })) {
     await clickStep(page, 'json', { optional: true });
     await clickStep(page, 'save', { optional: true });
   }
-
-  await clickStep(page, 'createFiles');
-  await page.waitForTimeout(3000);
-  await screenshot(page, 'export-requested');
-  log.info('Export aangevraagd bij Instagram.');
 }
 
-// Kijkt of er een export klaarstaat. Zo ja: downloadt hem en geeft de bytes
-// terug. Zo nee: null, en probeert de agent het bij de volgende dagelijkse run
-// gewoon opnieuw. Er wordt nooit gewacht in een lus.
+async function requestExport(page, { username, dryRun = false } = {}) {
+  const heading = await gotoDyi(page);
+  log.info(`Startscherm: "${heading}"`);
+
+  await clickStep(page, 'createExport');
+
+  // Meerdere gekoppelde accounts: expliciet het juiste profiel kiezen.
+  const afterCreate = await currentHeading(page);
+  if (headingMatches(afterCreate, 'profiles')) {
+    if (!username) throw new Error('Er wordt om een profiel gevraagd maar IG_USERNAME is niet ingesteld in agent/.env.');
+    if (!(await clickLabels(page, [username]))) {
+      const shot = await screenshot(page, 'fail-profile');
+      throw new Error(`Profiel "${username}" niet gevonden op het profielscherm. Screenshot: ${shot}`);
+    }
+    log.info(`Profiel "${username}" gekozen.`);
+  }
+
+  await clickStep(page, 'exportToDevice');
+
+  const confirm = await currentHeading(page);
+  if (!headingMatches(confirm, 'confirm')) {
+    log.warn(`Onverwacht scherm voor bevestiging: "${confirm}"`);
+  }
+
+  await narrowScope(page);
+
+  if (dryRun) {
+    const shot = await screenshot(page, 'dryrun-confirm');
+    log.info(`--dry-run: gestopt vlak voor "Export starten". Screenshot: ${shot}`);
+    return false;
+  }
+
+  await clickStep(page, 'startExport');
+  await page.waitForTimeout(SETTLE_MS);
+  await screenshot(page, 'export-requested');
+  log.info('Export aangevraagd bij Instagram.');
+  return true;
+}
+
+// Kijkt of er een export klaarstaat. Zo ja: downloadt hem. Zo nee: null, en
+// probeert de agent het bij de volgende dagelijkse run opnieuw. Er wordt nooit
+// gewacht in een lus.
 async function tryDownloadReady(page) {
   await gotoDyi(page);
 
-  const button = await findByLabels(page, selectors.steps.downloadReady, { timeout: 8000 });
-  if (!button) {
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 120000 }).catch(() => null),
+    clickLabels(page, labelsFor('downloadReady')),
+  ]);
+
+  if (!download) {
     log.info('Nog geen export klaar om te downloaden.');
     return null;
   }
-
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: 120000 }),
-    button.click(),
-  ]);
 
   const target = path.join(DOWNLOAD_DIR, download.suggestedFilename() || 'export.zip');
   await download.saveAs(target);
   const buffer = fs.readFileSync(target);
   log.info(`Export gedownload: ${target} (${Math.round(buffer.length / 1024)} KB)`);
-
-  // Zip is uitgelezen zodra de agent hem geparsed heeft; hem laten staan zou de
-  // schijf volzetten met volgerslijsten in platte tekst.
   return { buffer, file: target };
 }
 
+// De zip bevat je volgerslijst in platte tekst; die laten slingeren op schijf
+// is onnodig.
 function cleanupDownload(file) {
   try {
     fs.unlinkSync(file);
   } catch {
-    // Al weg of in gebruik - niet belangrijk genoeg om de run op te laten klappen.
+    // Al weg of in gebruik.
   }
 }
 
-module.exports = { requestExport, tryDownloadReady, gotoDyi, assertLoggedIn, cleanupDownload };
+module.exports = { requestExport, tryDownloadReady, gotoDyi, assertLoggedIn, cleanupDownload, currentHeading };
