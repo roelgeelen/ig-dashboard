@@ -38,12 +38,23 @@ async function updateAccount(account) {
   console.log(`[${account.slug}] Token ververst, geldig voor`, Math.round(refreshJson.expires_in / 86400), 'dagen');
 
   console.log(`[${account.slug}] Volgersaantal ophalen...`);
-  const meRes = await fetch(`https://graph.instagram.com/v22.0/me?fields=id,username,followers_count,follows_count&access_token=${encodeURIComponent(newToken)}`);
-  const meJson = await meRes.json();
+  // media_count komt uit dezelfde User-node en hoort bij de basisvelden, maar
+  // niet elke token/accounttype levert hem. Daarom vragen we hem er optioneel
+  // bij en vallen we bij een fout stil terug op de velden die er altijd zijn -
+  // een ontbrekend berichtenaantal mag de dagelijkse meting nooit kosten.
+  async function fetchMe(fields) {
+    const res = await fetch(`https://graph.instagram.com/v22.0/me?fields=${fields}&access_token=${encodeURIComponent(newToken)}`);
+    return res.json();
+  }
+  let meJson = await fetchMe('id,username,followers_count,follows_count,media_count');
+  if (meJson.error) {
+    console.warn(`[${account.slug}] Uitgebreide velden mislukt (${JSON.stringify(meJson.error)}), val terug op basisvelden.`);
+    meJson = await fetchMe('id,username,followers_count,follows_count');
+  }
   if (meJson.error) {
     throw new Error(`[${account.slug}] Ophalen gegevens mislukt: ${JSON.stringify(meJson.error)}`);
   }
-  console.log(`[${account.slug}] Opgehaald:`, meJson.username, meJson.followers_count, meJson.follows_count);
+  console.log(`[${account.slug}] Opgehaald:`, meJson.username, meJson.followers_count, meJson.follows_count, meJson.media_count != null ? `(${meJson.media_count} berichten)` : '');
 
   const newTokenData = {
     access_token: newToken,
@@ -62,6 +73,7 @@ async function updateAccount(account) {
   }
   const today = new Date().toISOString().slice(0, 10);
   const entry = { date: today, followers_count: meJson.followers_count, follows_count: meJson.follows_count };
+  if (meJson.media_count != null) entry.media_count = meJson.media_count;
   const idx = history.findIndex(h => h.date === today);
   if (idx >= 0) history[idx] = entry; else history.push(entry);
   fs.mkdirSync(dir, { recursive: true });

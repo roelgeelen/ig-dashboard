@@ -3,117 +3,257 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Instagram Groei Dashboard</title>
+<title>Instagram Analytics Dashboard</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/theme/mermaid.min.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/gridjs.umd.js" integrity="sha384-/XXDzxe4FsGiAe50i/u9pY/Vy/uX654MHB1xoc1BJNnH1WXHhqHga9g3q5tF4gj7" crossorigin="anonymous"></script>
 <style>
-  :root { color-scheme: light; --pink:#E1306C; --purple:#833AB4; --blue:#405DE6; --bg:#fafafa; --card:#fff; --border:#e8e8e8; --text:#1c1e21; --muted:#65676b; }
+  /* ---- Professioneel, merk-neutraal palet (gevalideerd via de dataviz-skill).
+     Bewust niet de Instagram-gradient: rustige oppervlakken, één blauw accent,
+     en een tweede aqua-tint voor de tweede serie. Licht en donker in één plek. ---- */
+  :root {
+    color-scheme: light;
+    --plane:#f4f4f2; --surface:#ffffff; --surface-2:#fcfcfb; --raised:#ffffff;
+    --ink:#0b0b0b; --sec:#52514e; --muted:#8a8880;
+    --border:rgba(11,11,11,0.09); --border-strong:rgba(11,11,11,0.14); --grid:#e7e6e0;
+    --accent:#2a78d6; --accent-2:#1baf7a; --accent-soft:rgba(42,120,214,0.10);
+    --good:#0f7a30; --good-strong:#0ca30c; --bad:#d03b3b; --warn:#8a6116;
+    --chip:#f1f1ee; --chip-ink:#3a3a37;
+    --radius:16px; --radius-sm:10px;
+    --shadow:0 1px 2px rgba(11,11,11,0.04), 0 2px 8px rgba(11,11,11,0.05);
+    --shadow-lg:0 4px 24px rgba(11,11,11,0.08);
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:#0c0c0c; --surface:#171716; --surface-2:#1a1a19; --raised:#1f1f1d;
+    --ink:#ffffff; --sec:#c3c2b7; --muted:#8f8d84;
+    --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.16); --grid:#2c2c2a;
+    --accent:#3987e5; --accent-2:#22b985; --accent-soft:rgba(57,135,229,0.16);
+    --good:#3fbf5f; --good-strong:#0ca30c; --bad:#e46a6a; --warn:#e0b25a;
+    --chip:#26261f; --chip-ink:#d7d6cb;
+    --shadow:0 1px 2px rgba(0,0,0,0.5); --shadow-lg:0 8px 30px rgba(0,0,0,0.55);
+  }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  header.top { background:linear-gradient(90deg,#405DE6 0%,#833AB4 25%,#C13584 50%,#E1306C 75%,#F77737 100%); padding:26px 24px; color:#fff; }
-  header.top .top-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; max-width:900px; margin:0 auto; }
-  header.top h1 { margin:0 0 4px 0; font-size:20px; }
-  header.top p { margin:0; font-size:12.5px; opacity:.92; }
-  .account-switcher { background:rgba(255,255,255,0.18); color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:999px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; -webkit-appearance:none; appearance:none; }
-  .account-switcher option { color:#1c1e21; }
-  .wrap { max-width:900px; margin:0 auto; padding:20px 16px 60px; }
-  .gate { max-width:420px; margin:80px auto; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:28px; text-align:center; }
-  .gate input { width:100%; padding:12px 14px; font-size:15px; border:1px solid #ccc; border-radius:8px; margin:14px 0; }
-  .gate button, button.primary { background:var(--pink); color:#fff; border:none; border-radius:8px; padding:11px 18px; font-size:14px; font-weight:600; cursor:pointer; width:100%; }
-  .gate .err { color:#d93025; font-size:13px; margin-top:8px; min-height:16px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
-  .card .label { font-size:12px; color:var(--muted); margin-bottom:6px; }
-  .card .value { font-size:22px; font-weight:700; }
-  .card .delta { font-size:11.5px; margin-top:4px; }
-  .delta.up{color:#1a7f37;} .delta.down{color:#d93025;} .delta.flat{color:var(--muted);}
-  .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:18px; }
-  .panel h2 { font-size:14px; margin:0 0 4px 0; }
-  .panel .sub { font-size:12px; color:var(--muted); margin-bottom:12px; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--plane); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.45;
+  }
+
+  /* ---- Header ---- */
+  header.top { background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20; backdrop-filter:saturate(1.2); }
+  header.top .top-inner { max-width:1080px; margin:0 auto; padding:14px 22px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
+  .brand { display:flex; align-items:center; gap:12px; min-width:0; }
+  .brand-mark { width:38px; height:38px; border-radius:11px; flex:0 0 auto; display:grid; place-items:center; color:#fff; font-size:17px; font-weight:700; background:linear-gradient(135deg,var(--accent),var(--accent-2)); box-shadow:var(--shadow); }
+  .brand .eyebrow { font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .brand h1 { margin:0; font-size:17px; font-weight:650; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .brand #headerSubtitle { margin:1px 0 0; font-size:12px; color:var(--muted); }
+  .top-actions { display:flex; align-items:center; gap:8px; }
+  .account-switcher { background:var(--surface-2); color:var(--ink); border:1px solid var(--border-strong); border-radius:999px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; -webkit-appearance:none; appearance:none; }
+  .icon-btn { width:38px; height:38px; border-radius:10px; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--ink); font-size:15px; cursor:pointer; display:grid; place-items:center; transition:background .15s,border-color .15s; }
+  .icon-btn:hover { background:var(--chip); }
+
+  .wrap { max-width:1080px; margin:0 auto; padding:22px 22px 70px; }
+  .section-title { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:650; margin:28px 2px 12px; }
+  .section-title:first-child { margin-top:6px; }
+
+  /* ---- Gate ---- */
+  .gate { max-width:400px; margin:12vh auto; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:30px; text-align:center; box-shadow:var(--shadow-lg); }
+  .gate h2 { margin:0 0 6px; font-size:19px; }
+  .gate p { font-size:13px; color:var(--muted); margin:0; }
+  .gate input { width:100%; padding:12px 14px; font-size:15px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin:16px 0; background:var(--surface-2); color:var(--ink); }
+  .gate .err { color:var(--bad); font-size:13px; margin-top:8px; min-height:16px; }
+  button.primary { background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm); padding:11px 18px; font-size:14px; font-weight:600; cursor:pointer; width:100%; transition:filter .15s; }
+  button.primary:hover { filter:brightness(1.05); }
+
+  /* ---- KPI tegels ---- */
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:12px; }
+  .kpi { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; box-shadow:var(--shadow); position:relative; overflow:hidden; }
+  .kpi-primary { grid-column:span 2; }
+  .kpi-label { font-size:11.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .kpi-value { font-size:30px; font-weight:680; letter-spacing:-.02em; margin-top:6px; line-height:1.05; }
+  .kpi-primary .kpi-value { font-size:40px; }
+  .kpi-sub { font-size:12.5px; margin-top:6px; color:var(--sec); }
+  .kpi-note { color:var(--muted); }
+  .kpi-spark { margin-top:10px; }
+  .kpi-spark svg { display:block; width:100%; height:40px; }
+  .d.up { color:var(--good); font-weight:600; } .d.down { color:var(--bad); font-weight:600; } .d.flat { color:var(--muted); }
+  .dot { color:var(--muted); margin:0 6px; }
+
+  /* ---- Inzicht-tegels ---- */
+  .insight-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+  .insight { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:15px 17px; box-shadow:var(--shadow); }
+  .insight-label { font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .insight-value { font-size:22px; font-weight:650; letter-spacing:-.01em; margin-top:5px; }
+  .insight-note { font-size:12px; color:var(--muted); margin-top:3px; }
+
+  /* ---- Panelen ---- */
+  .panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:16px; box-shadow:var(--shadow); }
+  .panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .panel h2 { font-size:15px; margin:0; font-weight:640; letter-spacing:-.01em; }
+  .panel .sub { font-size:12.5px; color:var(--muted); margin-top:3px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ .grid-2 { grid-template-columns:1fr; } .kpi-primary { grid-column:span 2; } }
+
+  /* ---- Segmented control (bereik) ---- */
+  .seg { display:inline-flex; background:var(--surface-2); border:1px solid var(--border-strong); border-radius:999px; padding:3px; gap:2px; }
+  .seg-btn { border:none; background:transparent; color:var(--muted); font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px; cursor:pointer; }
+  .seg-btn.active { background:var(--accent); color:#fff; }
+  .toolbtn { border:1px solid var(--border-strong); background:var(--surface-2); color:var(--sec); font-size:12px; font-weight:600; padding:6px 12px; border-radius:999px; cursor:pointer; }
+  .toolbtn:hover { background:var(--chip); }
+
   #app { display:none; }
   .hidden { display:none !important; }
-  footer { text-align:center; font-size:11px; color:var(--muted); padding:16px 0 30px; }
-  .status-msg { font-size:12.5px; padding:9px 11px; border-radius:8px; margin-top:10px; display:none; }
+  footer { text-align:center; font-size:11.5px; color:var(--muted); padding:20px 16px 30px; max-width:720px; margin:0 auto; }
+
+  .status-msg { font-size:12.5px; padding:9px 12px; border-radius:var(--radius-sm); margin-top:10px; display:none; }
   .status-msg.show { display:block; }
-  .status-msg.success{background:#e6f4ea;color:#1a7f37;} .status-msg.error{background:#fce8e6;color:#d93025;} .status-msg.info{background:#eef2ff;color:#3730a3;}
-  .dropzone { border:2px dashed #d6c2d6; border-radius:10px; padding:22px; text-align:center; background:#fdfaff; cursor:pointer; transition:background .15s, border-color .15s; }
-  .dropzone.drag { background:#f6ecf9; border-color:var(--pink); }
-  .dropzone .big { font-size:14px; font-weight:600; margin-bottom:4px; }
+  .status-msg.success{ background:rgba(15,122,48,0.12); color:var(--good); }
+  .status-msg.error{ background:rgba(208,59,59,0.12); color:var(--bad); }
+  .status-msg.info{ background:var(--accent-soft); color:var(--accent); }
+
+  .dropzone { border:1.5px dashed var(--border-strong); border-radius:var(--radius-sm); padding:22px; text-align:center; background:var(--surface-2); cursor:pointer; transition:background .15s,border-color .15s; }
+  .dropzone.drag { background:var(--accent-soft); border-color:var(--accent); }
+  .dropzone .big { font-size:13.5px; font-weight:600; margin-bottom:4px; }
   .dropzone .small { font-size:12px; color:var(--muted); }
   .dropzone input[type=file] { display:none; }
   .fallback-form { display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
   .fallback-form.show { display:block; }
   .upload-row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:8px; }
-  .upload-row input[type=file] { border:1px dashed #c9c9c9; border-radius:8px; padding:10px; font-size:12.5px; background:#fcfcfc; }
-  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:12.5px; cursor:pointer; width:auto; }
-  button.linklike { background:none; border:none; color:var(--pink); font-size:12px; cursor:pointer; padding:0; text-decoration:underline; width:auto; }
+  .upload-row input[type=file] { border:1px dashed var(--border-strong); border-radius:var(--radius-sm); padding:10px; font-size:12.5px; background:var(--surface-2); color:var(--ink); }
+  button.ghost { background:transparent; color:var(--sec); border:1px solid var(--border-strong); border-radius:var(--radius-sm); padding:8px 14px; font-size:12.5px; cursor:pointer; width:auto; }
+  button.linklike { background:none; border:none; color:var(--accent); font-size:12px; cursor:pointer; padding:0; text-decoration:underline; width:auto; }
+
   .tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
-  /* Op een telefoon zouden negen tabs over vier regels breken en een derde van
-     het scherm opeten voordat je iets ziet. Daar wordt het een swipebare rij. */
   @media (max-width: 640px) {
     .tabs { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding-bottom:2px; }
     .tabs::-webkit-scrollbar { display:none; }
     .tab { flex:0 0 auto; }
+    .grid-2 { grid-template-columns:1fr; }
   }
-  .tab { padding:8px 14px; border-radius:999px; font-size:12.5px; cursor:pointer; border:1px solid var(--border); background:#fff; color:var(--text); white-space:nowrap; }
-  .tab.active { background:var(--text); color:#fff; border-color:var(--text); }
-  .tab .count { opacity:.65; font-size:11px; margin-left:4px; }
+  .tab { padding:7px 13px; border-radius:999px; font-size:12.5px; cursor:pointer; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--sec); white-space:nowrap; }
+  .tab.active { background:var(--ink); color:var(--surface); border-color:var(--ink); }
+  .tab .count { opacity:.6; font-size:11px; margin-left:4px; }
   .tabpage { display:none; }
   .tabpage.active { display:block; }
   .empty-state { padding:30px 10px; text-align:center; color:var(--muted); font-size:13px; }
-  .agent-banner { font-size:12.5px; padding:9px 11px; border-radius:8px; margin-bottom:12px; }
-  .agent-banner.ok { background:#e6f4ea; color:#1a7f37; }
-  .agent-banner.warn { background:#fef7e0; color:#8a6116; }
-  .agent-banner.error { background:#fce8e6; color:#d93025; }
-  .agent-banner.idle { background:#eef2ff; color:#3730a3; }
-  .tab-note { background:#fef7e0; color:#8a6116; padding:9px 11px; border-radius:8px; margin-bottom:12px; }
-  a.profile-link { color:var(--pink); text-decoration:none; font-weight:600; }
+  .agent-banner { font-size:12.5px; padding:10px 12px; border-radius:var(--radius-sm); margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .agent-banner::before { content:""; width:8px; height:8px; border-radius:999px; flex:0 0 auto; background:currentColor; }
+  .agent-banner.ok { background:rgba(15,122,48,0.10); color:var(--good); }
+  .agent-banner.warn { background:rgba(138,97,22,0.12); color:var(--warn); }
+  .agent-banner.error { background:rgba(208,59,59,0.12); color:var(--bad); }
+  .agent-banner.idle { background:var(--accent-soft); color:var(--accent); }
+  .tab-note { background:rgba(138,97,22,0.12); color:var(--warn); padding:9px 11px; border-radius:var(--radius-sm); margin-bottom:12px; }
+  a.profile-link { color:var(--accent); text-decoration:none; font-weight:600; }
   a.profile-link:hover { text-decoration:underline; }
   details.gh-settings { font-size:12.5px; }
   details.gh-settings summary { cursor:pointer; color:var(--muted); }
-  details.gh-settings input[type=password] { width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; margin-top:8px; font-size:13px; }
+  details.gh-settings input[type=password] { width:100%; padding:10px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:8px; font-size:13px; background:var(--surface-2); color:var(--ink); }
   details.gh-settings .row { display:flex; gap:8px; margin-top:10px; }
   details.gh-settings button { width:auto; }
+  code { background:var(--chip); color:var(--chip-ink); padding:1px 5px; border-radius:5px; font-size:.92em; }
+
+  /* ---- Grid.js afgestemd op het thema ---- */
+  .gridjs-container { color:var(--ink); }
+  .gridjs-wrapper { border-color:var(--border) !important; box-shadow:none !important; border-radius:var(--radius-sm); }
+  table.gridjs-table { background:var(--surface); }
+  th.gridjs-th { background:var(--surface-2) !important; color:var(--sec) !important; border-color:var(--border) !important; }
+  td.gridjs-td { background:var(--surface) !important; color:var(--ink) !important; border-color:var(--border) !important; }
+  .gridjs-tr:hover td.gridjs-td { background:var(--surface-2) !important; }
+  input.gridjs-input, .gridjs-search-input { background:var(--surface-2) !important; color:var(--ink) !important; border-color:var(--border-strong) !important; }
+  .gridjs-pagination { color:var(--sec) !important; }
+  .gridjs-pagination .gridjs-pages button { background:var(--surface-2) !important; color:var(--ink) !important; border-color:var(--border) !important; }
+  .gridjs-pagination .gridjs-pages button:disabled { color:var(--muted) !important; }
+  .gridjs-pagination .gridjs-pages button.gridjs-currentPage { background:var(--accent) !important; color:#fff !important; }
+  .gridjs-footer { background:var(--surface-2) !important; border-color:var(--border) !important; box-shadow:none !important; }
+  .gridjs-th-content { color:var(--sec) !important; }
 </style>
 </head>
 <body>
 
 <div class="gate" id="gate">
-  <h2 style="margin-top:0;">🔒 Instagram Dashboard</h2>
-  <p style="font-size:13px;color:var(--muted);">Voer je passphrase in om je gegevens te ontsleutelen</p>
+  <h2>Instagram Analytics</h2>
+  <p>Voer je passphrase in om je gegevens te ontsleutelen</p>
   <input type="password" id="passphraseInput" placeholder="Passphrase" autocomplete="off" />
-  <button onclick="unlockDashboard()">Ontgrendelen</button>
+  <button class="primary" onclick="unlockDashboard()">Ontgrendelen</button>
   <div class="err" id="gateErr"></div>
 </div>
 
 <div id="app">
   <header class="top">
-    <div class="top-row">
-      <div>
-        <h1>Instagram Groei Dashboard</h1>
-        <p id="headerSubtitle">Laatste update: —</p>
+    <div class="top-inner">
+      <div class="brand">
+        <div class="brand-mark">◎</div>
+        <div>
+          <div class="eyebrow">Instagram analytics</div>
+          <h1 id="acctTitle">Dashboard</h1>
+          <p id="headerSubtitle">Laatste update: —</p>
+        </div>
       </div>
-      <select id="accountSwitcher" class="account-switcher" style="display:none;" aria-label="Profiel kiezen"></select>
+      <div class="top-actions">
+        <select id="accountSwitcher" class="account-switcher" style="display:none;" aria-label="Profiel kiezen"></select>
+        <button id="themeToggle" class="icon-btn" title="Licht/donker wisselen" aria-label="Thema wisselen"></button>
+      </div>
     </div>
   </header>
+
   <div class="wrap">
-    <div class="cards" id="summaryCards"></div>
+    <div class="section-title">Overzicht</div>
+    <div class="kpi-grid" id="summaryCards"></div>
+
+    <div class="section-title">Inzichten</div>
+    <div class="insight-grid" id="insightsRow"></div>
+
+    <div class="section-title">Trends</div>
     <div class="panel">
-      <h2>Volgers &amp; volgend over tijd</h2>
-      <div class="sub">Automatisch bijgewerkt, elke ochtend via de Instagram API</div>
-      <div style="height:240px;"><canvas id="historyChart"></canvas></div>
-    </div>
-    <div class="panel">
-      <h2>Groei per dag</h2>
-      <div class="sub">Netto verandering in volgers t.o.v. de vorige dag</div>
-      <div style="height:200px;"><canvas id="growthChart"></canvas></div>
+      <div class="panel-head">
+        <div>
+          <h2>Volgers &amp; volgend over tijd</h2>
+          <div class="sub">Dagelijks automatisch bijgewerkt via de officiële Instagram API</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <div class="seg" id="rangeSeg">
+            <button class="seg-btn" data-range="30">30d</button>
+            <button class="seg-btn" data-range="90">90d</button>
+            <button class="seg-btn" data-range="365">1j</button>
+            <button class="seg-btn active" data-range="all">Alles</button>
+          </div>
+          <button class="toolbtn" id="csvBtn" title="Download de dagelijkse cijfers als CSV">CSV</button>
+        </div>
+      </div>
+      <div style="height:260px;"><canvas id="historyChart"></canvas></div>
     </div>
 
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-head"><div><h2>Dagelijkse nettogroei</h2><div class="sub">Verandering per dag, met 7-daags gemiddelde</div></div></div>
+        <div style="height:220px;"><canvas id="growthChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><div><h2>Groei per week</h2><div class="sub">Netto volgers per kalenderweek</div></div></div>
+        <div style="height:220px;"><canvas id="weeklyChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel" id="cohortPanel" style="display:none;">
+      <div class="panel-head"><div><h2>Wanneer je huidige volgers binnenkwamen</h2><div class="sub">Op basis van de "volgt sinds"-datums uit je export</div></div></div>
+      <div style="height:220px;"><canvas id="cohortChart"></canvas></div>
+    </div>
+
+    <div class="section-title">Relaties</div>
     <div class="panel">
-      <h2>Naamlijsten bijwerken</h2>
-      <div class="sub">Normaal gesproken hoef je hier niets te doen: de agent op je PC vraagt elke 4 dagen automatisch een export aan en werkt de lijst bij. Dit vak is het vangnet — bijvoorbeeld als je sessie verlopen is of je tussendoor een verse meting wil. Vraag je export aan via Instagram → Instellingen → "Je informatie downloaden" → Volgers en gevolgde accounts, en sleep de .zip hieronder. Werkt ook vanaf je telefoon.</div>
+      <div class="agent-banner idle" id="agentBanner">Agent-status wordt geladen…</div>
+      <div id="namesLastUpdate" class="sub" style="margin-bottom:10px;">Nog geen naamlijst opgehaald.</div>
+      <div class="kpi-grid" id="nameCards"></div>
+      <div class="tabs" id="nameTabBar" style="margin-top:18px;"></div>
+      <div id="nameTabPages"></div>
+    </div>
+
+    <div class="section-title">Naamlijsten bijwerken</div>
+    <div class="panel">
+      <div class="sub" style="margin-bottom:12px;">Normaal hoef je hier niets te doen: de agent op je PC vraagt elke 4 dagen automatisch een export aan en werkt de lijst bij. Dit vak is het vangnet — bijvoorbeeld als je sessie verlopen is of je tussendoor een verse meting wil. Vraag je export aan via Instagram → Instellingen → "Je informatie downloaden" → Volgers en gevolgde accounts, en sleep de .zip hieronder. Werkt ook vanaf je telefoon.</div>
 
       <div class="dropzone" id="dropzone">
         <div class="big">Sleep je export .zip hierheen, of klik om te kiezen</div>
@@ -145,15 +285,8 @@
         </div>
       </details>
     </div>
-
-    <div class="panel">
-      <div class="agent-banner idle" id="agentBanner">Agent-status wordt geladen…</div>
-      <div id="namesLastUpdate" class="sub" style="margin-bottom:6px;">Nog geen naamlijst opgehaald.</div>
-      <div class="cards" id="nameCards"></div>
-      <div class="tabs" id="nameTabBar" style="margin-top:16px;"></div>
-      <div id="nameTabPages"></div>
-    </div>
   </div>
+
   <footer>
     Aantallen worden dagelijks automatisch opgehaald via de officiële Instagram API. Naamlijsten worden elke 4 dagen automatisch bijgewerkt door de agent op je PC — vaker staat Instagram niet toe. Alle data is versleuteld met je passphrase.
   </footer>
@@ -206,11 +339,45 @@ let PASSPHRASE = null;
 let history = [];
 let nameStore = null;
 let agentStatus = null;
+let rangeDays = 'all';
+
+// ---- thema ----
+const PALETTE = {
+  light: { ink:'#0b0b0b', sec:'#52514e', muted:'#8a8880', grid:'#e7e6e0', surface:'#ffffff', border:'rgba(11,11,11,0.12)',
+           followers:'#2a78d6', following:'#1baf7a', good:'#0f7a30', bad:'#d03b3b', ma:'#8a8880' },
+  dark:  { ink:'#ffffff', sec:'#c3c2b7', muted:'#8f8d84', grid:'#2c2c2a', surface:'#171716', border:'rgba(255,255,255,0.16)',
+           followers:'#3987e5', following:'#22b985', good:'#3fbf5f', bad:'#e46a6a', ma:'#c3c2b7' },
+};
+function isDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
+function T() { return PALETTE[isDark() ? 'dark' : 'light']; }
+function hexA(hex, a) {
+  const h = hex.replace('#',''); const n = parseInt(h.length === 3 ? h.split('').map(c=>c+c).join('') : h, 16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+const ICON_MOON = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+const ICON_SUN = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8l1.8-1.8M18 6l1.8-1.8"/></svg>';
+function setThemeIcon(mode) {
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.innerHTML = mode === 'dark' ? ICON_SUN : ICON_MOON;
+}
+function applyTheme(mode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  localStorage.setItem('ig_dash_theme', mode);
+  setThemeIcon(mode);
+  if (PASSPHRASE) { renderAll(); renderNamesAll(); }
+}
+(function initTheme() {
+  let m = localStorage.getItem('ig_dash_theme');
+  if (m !== 'dark' && m !== 'light') m = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', m);
+})();
+
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.font.family = "system-ui,-apple-system,'Segoe UI',sans-serif";
+  Chart.defaults.font.size = 11;
+}
 
 // ---- meerdere profielen ----
-// data/accounts.json somt de accounts op die het dashboard volgt. Elk account
-// heeft zijn eigen submap in data/ met dezelfde vier versleutelde bestanden als
-// voorheen. De switcher bovenin wisselt tussen die submappen.
 let ACCOUNTS = [];
 let DEFAULT_ACCOUNT = null;
 let currentAccount = null;
@@ -223,7 +390,6 @@ async function loadAccounts() {
     ACCOUNTS = (m.accounts || []).map(a => ({ slug: a.slug, username: a.username, label: a.label || ('@' + a.username) }));
     DEFAULT_ACCOUNT = m.default || (ACCOUNTS[0] && ACCOUNTS[0].slug);
   } catch {
-    // Nog geen manifest: val terug op het oorspronkelijke ene account.
     ACCOUNTS = [{ slug: 'dutch_718_gts', username: 'dutch_718_gts', label: '@dutch_718_gts' }];
     DEFAULT_ACCOUNT = 'dutch_718_gts';
   }
@@ -252,14 +418,14 @@ async function fetchDecrypt(path, fallback) {
   } catch { return fallback; }
 }
 
-// Laadt en toont alle data van het huidige account. Draait na het ontgrendelen
-// en telkens als er van profiel gewisseld wordt.
 async function loadAccount() {
   history = await fetchDecrypt(accountPath('history.enc.json'), []);
   await loadNamesFromGitHub();
   await loadAgentStatus();
   const sel = document.getElementById('accountSwitcher');
   if (sel) sel.value = currentAccount;
+  const acct = ACCOUNTS.find(a => a.slug === currentAccount);
+  document.getElementById('acctTitle').textContent = acct ? acct.label : 'Dashboard';
   renderAll();
   renderNamesAll();
 }
@@ -270,8 +436,6 @@ async function unlockDashboard() {
   errEl.textContent = '';
   if (!pass) { errEl.textContent = 'Vul een passphrase in.'; return; }
   try {
-    // Valideer de passphrase tegen het standaardaccount, dat zeker metingen
-    // heeft. Een net toegevoegd account kan nog leeg zijn.
     const res = await fetch(`data/${DEFAULT_ACCOUNT}/history.enc.json`, { cache: 'no-store' });
     if (!res.ok) throw new Error('Kon history.enc.json niet laden (' + res.status + ')');
     const blob = await res.json();
@@ -297,88 +461,319 @@ document.getElementById('accountSwitcher').addEventListener('change', async (e) 
   await loadAccount();
 });
 
-// Laad eerst het accountoverzicht, ontgrendel daarna automatisch als de
-// passphrase deze sessie al eerder is ingevoerd.
+document.getElementById('themeToggle').addEventListener('click', () => applyTheme(isDark() ? 'light' : 'dark'));
+
+document.querySelectorAll('#rangeSeg .seg-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#rangeSeg .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  rangeDays = b.dataset.range === 'all' ? 'all' : parseInt(b.dataset.range, 10);
+  if (PASSPHRASE && history.length) renderHistoryChart();
+}));
+
+document.getElementById('csvBtn').addEventListener('click', exportCsv);
+
 (async function init() {
   await loadAccounts();
   const saved = sessionStorage.getItem('ig_dash_pass');
+  setThemeIcon(isDark() ? 'dark' : 'light');
   if (saved) {
     document.getElementById('passphraseInput').value = saved;
     await unlockDashboard();
   }
 })();
 
-function fmtDelta(cur, prev) {
-  if (prev === null || prev === undefined) return { text: 'eerste meting', cls: 'flat' };
-  const d = cur - prev;
-  if (d > 0) return { text: `+${d} sinds gisteren`, cls: 'up' };
-  if (d < 0) return { text: `${d} sinds gisteren`, cls: 'down' };
-  return { text: 'geen wijziging', cls: 'flat' };
+// =====================================================================
+// ---- Afgeleide statistieken uit de dagelijkse geschiedenis ----
+// =====================================================================
+function netSeries() {
+  const out = [];
+  for (let i = 1; i < history.length; i++) out.push({ date: history[i].date, net: history[i].followers_count - history[i-1].followers_count });
+  return out;
+}
+function daysBetween(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
+function valueDaysAgo(days) {
+  if (!history.length) return null;
+  const latest = history[history.length - 1];
+  const target = Date.parse(latest.date) - days * 86400000;
+  let best = history[0];
+  for (const h of history) { if (Date.parse(h.date) <= target) best = h; else break; }
+  return best;
+}
+function netOver(days) {
+  if (history.length < 2) return null;
+  const latest = history[history.length - 1];
+  const past = valueDaysAgo(days);
+  if (!past || past === latest) return null;
+  return { net: latest.followers_count - past.followers_count, spanDays: Math.max(1, daysBetween(past.date, latest.date)) };
+}
+function movingAvg(arr, n) {
+  return arr.map((_, i) => { const s = Math.max(0, i - n + 1); const w = arr.slice(s, i + 1); return Math.round((w.reduce((a, b) => a + b, 0) / w.length) * 10) / 10; });
+}
+function currentStreak() {
+  const ns = netSeries(); let s = 0;
+  for (let i = ns.length - 1; i >= 0; i--) { if (ns[i].net > 0) s++; else break; }
+  return s;
+}
+function bestDay() { const ns = netSeries(); if (!ns.length) return null; return ns.reduce((a, b) => b.net > a.net ? b : a); }
+function momentum() {
+  const ns = netSeries(); if (ns.length < 2) return null;
+  const last7 = ns.slice(-7).reduce((a, b) => a + b.net, 0);
+  const prev7 = ns.slice(-14, -7).reduce((a, b) => a + b.net, 0);
+  return { last7, prev7, diff: last7 - prev7 };
+}
+function nextMilestone(v) {
+  let step; if (v < 1000) step = 100; else if (v < 5000) step = 250; else if (v < 10000) step = 500; else step = 1000;
+  return Math.ceil((v + 1) / step) * step;
+}
+function projectMilestone() {
+  if (history.length < 3) return null;
+  const pts = history.slice(-30);
+  const y = pts.map(h => h.followers_count);
+  const n = y.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { sx += i; sy += y[i]; sxx += i * i; sxy += i * y[i]; }
+  const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  const cur = history[history.length - 1].followers_count;
+  const target = nextMilestone(cur);
+  if (!isFinite(slope) || slope <= 0) return { target, slope: 0, date: null };
+  const days = Math.ceil((target - cur) / slope);
+  const date = new Date(Date.now() + days * 86400000);
+  return { target, slope, days, date };
+}
+function isoWeekKey(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const day = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - day + 3);
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((d - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return d.getUTCFullYear() + '-W' + String(week).padStart(2, '0');
+}
+function weeklyGrowth() {
+  const ns = netSeries(); const m = new Map();
+  for (const e of ns) { const k = isoWeekKey(e.date); m.set(k, (m.get(k) || 0) + e.net); }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+function followerCohort() {
+  const s = normalizeNameStore(nameStore);
+  if (!s.current) return [];
+  const m = new Map();
+  for (const [, since] of s.current.followers) {
+    const d = parseExportDate(since);
+    if (!d) continue;
+    const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    m.set(k, (m.get(k) || 0) + 1);
+  }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-function renderCards() {
+// ---- opmaakhelpers ----
+function fmtN(n) { return (typeof n === 'number') ? n.toLocaleString('nl-NL') : n; }
+function signed(n) { return (n > 0 ? '+' : '') + n.toLocaleString('nl-NL'); }
+function deltaClass(n) { return n > 0 ? 'up' : (n < 0 ? 'down' : 'flat'); }
+function fmtDate(s) {
+  try { const d = new Date(s.length <= 10 ? s + 'T00:00:00' : s); return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }); }
+  catch { return s; }
+}
+function monthLabel(k) {
+  const [y, m] = k.split('-'); const names = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  return names[parseInt(m, 10) - 1] + ' ’' + y.slice(2);
+}
+function sparkline(values, color, w, h) {
+  w = w || 220; h = h || 40;
+  if (!values || values.length < 2) return '';
+  const min = Math.min(...values), max = Math.max(...values), rng = (max - min) || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * (w - 4) + 2;
+    const y = h - 3 - ((v - min) / rng) * (h - 6);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  const last = pts[pts.length - 1].split(',');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${pts.join(' ')}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6" fill="${color}"/></svg>`;
+}
+
+function exportCsv() {
+  if (!history.length) return;
+  const hasMedia = history.some(h => h.media_count != null);
+  const head = ['datum', 'volgers', 'volgend'].concat(hasMedia ? ['berichten'] : []);
+  const rows = [head].concat(history.map(h => [h.date, h.followers_count, h.follows_count].concat(hasMedia ? [h.media_count != null ? h.media_count : ''] : [])));
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${currentAccount}-volgers.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// =====================================================================
+// ---- Rendering: KPI's, inzichten, grafieken ----
+// =====================================================================
+function kpiTile(label, valueStr, subHtml, sparkHtml, primary) {
+  return `<div class="kpi ${primary ? 'kpi-primary' : ''}">
+    <div class="kpi-label">${label}</div>
+    <div class="kpi-value">${valueStr}</div>
+    <div class="kpi-sub">${subHtml || ''}</div>
+    ${sparkHtml ? `<div class="kpi-spark">${sparkHtml}</div>` : ''}
+  </div>`;
+}
+function deltaLine(today, label, n30) {
+  const parts = [];
+  if (today != null) parts.push(`<span class="d ${deltaClass(today)}">${signed(today)} ${label}</span>`);
+  if (n30) parts.push(`<span class="d ${deltaClass(n30.net)}">${signed(n30.net)} (30d)</span>`);
+  return parts.join('<span class="dot">·</span>') || '<span class="kpi-note">eerste meting</span>';
+}
+function renderKpis() {
   const latest = history[history.length - 1];
   const prev = history.length > 1 ? history[history.length - 2] : null;
-  const cards = [
-    { label: 'Volgers', value: latest.followers_count, delta: fmtDelta(latest.followers_count, prev ? prev.followers_count : null) },
-    { label: 'Volgend', value: latest.follows_count, delta: fmtDelta(latest.follows_count, prev ? prev.follows_count : null) },
-  ];
-  document.getElementById('summaryCards').innerHTML = cards.map(c => `
-    <div class="card">
-      <div class="label">${c.label}</div>
-      <div class="value">${c.value.toLocaleString('nl-NL')}</div>
-      <div class="delta ${c.delta.cls}">${c.delta.text}</div>
-    </div>
-  `).join('');
+  const todayF = prev ? latest.followers_count - prev.followers_count : null;
+  const todayG = prev ? latest.follows_count - prev.follows_count : null;
+  const n30 = netOver(30);
+  const ratio = latest.follows_count > 0 ? latest.followers_count / latest.follows_count : null;
+  const spark = sparkline(history.slice(-30).map(h => h.followers_count), T().followers);
+  const tiles = [];
+  tiles.push(kpiTile('Volgers', fmtN(latest.followers_count), deltaLine(todayF, 'vandaag', n30), spark, true));
+  tiles.push(kpiTile('Volgend', fmtN(latest.follows_count), deltaLine(todayG, 'vandaag', null), '', false));
+  tiles.push(kpiTile('Volg-ratio', ratio != null ? ratio.toFixed(2) : '—', '<span class="kpi-note">volgers per gevolgd account</span>', '', false));
+  tiles.push(kpiTile('Nettogroei (30d)', n30 ? signed(n30.net) : '—', `<span class="kpi-note">${n30 ? 'over ' + n30.spanDays + ' dagen' : 'onvoldoende data'}</span>`, '', false));
+  if (latest.media_count != null) tiles.push(kpiTile('Berichten', fmtN(latest.media_count), '<span class="kpi-note">totaal geplaatst</span>', '', false));
+  document.getElementById('summaryCards').innerHTML = tiles.join('');
 }
 
-let chartInstance = null, growthChartInstance = null;
-function renderCharts() {
-  const labels = history.map(h => h.date);
-  const followerData = history.map(h => h.followers_count);
-  const followingData = history.map(h => h.follows_count);
+function insightCard(label, value, note) {
+  return `<div class="insight"><div class="insight-label">${label}</div><div class="insight-value">${value}</div><div class="insight-note">${note}</div></div>`;
+}
+function renderInsights() {
+  const el = document.getElementById('insightsRow');
+  if (history.length < 2) { el.innerHTML = '<div class="insight"><div class="insight-note">Meer inzichten verschijnen zodra er meerdere dagen gemeten zijn.</div></div>'; return; }
+  const n30 = netOver(30);
+  const avg = n30 ? n30.net / n30.spanDays : null;
+  const bd = bestDay();
+  const streak = currentStreak();
+  const mo = momentum();
+  const proj = projectMilestone();
+  const cards = [];
+  cards.push(insightCard('Gem. groei per dag', avg != null ? signed(Math.round(avg * 10) / 10) : '—', 'gemiddelde over 30 dagen'));
+  cards.push(insightCard('Beste dag', bd ? signed(bd.net) : '—', bd ? fmtDate(bd.date) : 'nog geen data'));
+  cards.push(insightCard('Groeireeks', streak + ' dag' + (streak === 1 ? '' : 'en'), streak ? 'achtereen erbij' : 'geen lopende reeks'));
+  if (mo) cards.push(insightCard('Momentum (7d)', signed(mo.last7), `vorige 7 dagen: ${signed(mo.prev7)}`));
+  if (proj) cards.push(insightCard('Volgende mijlpaal', fmtN(proj.target), proj.date ? 'verwacht rond ' + fmtDate(proj.date.toISOString().slice(0, 10)) : 'bij huidige trend niet in zicht'));
+  el.innerHTML = cards.join('');
+}
+
+// ---- Chart.js gedeelde opties ----
+function baseScales(yZero) {
+  const t = T();
+  return {
+    x: { grid: { display: false }, border: { display: false }, ticks: { color: t.muted, maxRotation: 0, autoSkipPadding: 20 } },
+    y: { grid: { color: t.grid }, border: { display: false }, ticks: { color: t.muted, precision: 0 }, beginAtZero: !!yZero },
+  };
+}
+function baseTooltip() {
+  const t = T();
+  return { backgroundColor: t.surface, titleColor: t.ink, bodyColor: t.sec, borderColor: t.border, borderWidth: 1, padding: 10, cornerRadius: 8, usePointStyle: true, boxPadding: 4 };
+}
+function legendOpts(display) {
+  const t = T();
+  return { display: display, position: 'top', align: 'end', labels: { color: t.sec, usePointStyle: true, pointStyleWidth: 10, boxHeight: 7, padding: 14, font: { size: 12 } } };
+}
+
+let chartInstance = null, growthChartInstance = null, weeklyChartInstance = null, cohortChartInstance = null;
+
+function filteredHistory() {
+  if (rangeDays === 'all' || !history.length) return history;
+  const cutoff = Date.parse(history[history.length - 1].date) - rangeDays * 86400000;
+  const f = history.filter(h => Date.parse(h.date) >= cutoff);
+  return f.length ? f : history;
+}
+
+function renderHistoryChart() {
+  const t = T();
+  const data = filteredHistory();
   const ctx = document.getElementById('historyChart').getContext('2d');
   if (chartInstance) chartInstance.destroy();
   chartInstance = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [
-      { label: 'Volgers', data: followerData, borderColor: '#E1306C', backgroundColor: 'rgba(225,48,108,0.08)', tension: .25, fill: true },
-      { label: 'Volgend', data: followingData, borderColor: '#405DE6', backgroundColor: 'rgba(64,93,230,0.06)', tension: .25, fill: true },
+    data: { labels: data.map(h => h.date), datasets: [
+      { label: 'Volgers', data: data.map(h => h.followers_count), borderColor: t.followers, backgroundColor: hexA(t.followers, 0.10), borderWidth: 2, tension: .25, fill: true, pointRadius: 0, pointHoverRadius: 5, pointHoverBorderColor: t.surface, pointHoverBorderWidth: 2, pointHoverBackgroundColor: t.followers },
+      { label: 'Volgend', data: data.map(h => h.follows_count), borderColor: t.following, backgroundColor: hexA(t.following, 0.07), borderWidth: 2, tension: .25, fill: true, pointRadius: 0, pointHoverRadius: 5, pointHoverBorderColor: t.surface, pointHoverBorderWidth: 2, pointHoverBackgroundColor: t.following },
     ]},
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: false } } }
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: legendOpts(true), tooltip: baseTooltip() }, scales: baseScales(false) }
   });
+}
 
-  const growthLabels = [], growthData = [];
-  for (let i = 1; i < history.length; i++) {
-    growthLabels.push(history[i].date);
-    growthData.push(history[i].followers_count - history[i-1].followers_count);
-  }
-  const gctx = document.getElementById('growthChart').getContext('2d');
+function renderGrowthChart() {
+  const t = T();
+  const ns = netSeries();
+  const labels = ns.map(e => e.date);
+  const vals = ns.map(e => e.net);
+  const ma = movingAvg(vals, 7);
+  const ctx = document.getElementById('growthChart').getContext('2d');
   if (growthChartInstance) growthChartInstance.destroy();
-  growthChartInstance = new Chart(gctx, {
+  growthChartInstance = new Chart(ctx, {
+    data: { labels: labels.length ? labels : ['—'], datasets: [
+      { type: 'bar', label: 'Nettogroei', order: 2, data: vals.length ? vals : [0],
+        backgroundColor: (vals.length ? vals : [0]).map(v => v >= 0 ? hexA(t.good, 0.85) : hexA(t.bad, 0.85)),
+        borderRadius: 3, maxBarThickness: 16, categoryPercentage: .8, barPercentage: .9 },
+      { type: 'line', label: '7-daags gemiddelde', order: 1, data: ma, borderColor: t.ma, borderWidth: 2, tension: .35, pointRadius: 0, fill: false },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: legendOpts(true), tooltip: baseTooltip() }, scales: baseScales(true) }
+  });
+}
+
+function renderWeeklyChart() {
+  const t = T();
+  const w = weeklyGrowth();
+  const labels = w.map(e => e[0].replace(/^\d{4}-W/, 'wk '));
+  const vals = w.map(e => e[1]);
+  const ctx = document.getElementById('weeklyChart').getContext('2d');
+  if (weeklyChartInstance) weeklyChartInstance.destroy();
+  weeklyChartInstance = new Chart(ctx, {
     type: 'bar',
-    data: { labels: growthLabels.length ? growthLabels : ['—'], datasets: [{
-      label: 'Netto nieuwe volgers', data: growthData.length ? growthData : [0],
-      backgroundColor: (growthData.length ? growthData : [0]).map(v => v >= 0 ? '#1a7f37' : '#d93025'),
-    }]},
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    data: { labels: labels.length ? labels : ['—'], datasets: [
+      { label: 'Netto per week', data: vals.length ? vals : [0],
+        backgroundColor: (vals.length ? vals : [0]).map(v => v >= 0 ? hexA(t.good, 0.85) : hexA(t.bad, 0.85)),
+        borderRadius: 3, maxBarThickness: 22 },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: legendOpts(false), tooltip: baseTooltip() }, scales: baseScales(true) }
+  });
+}
+
+function renderCohortChart() {
+  const panel = document.getElementById('cohortPanel');
+  const c = followerCohort();
+  if (!c.length) { panel.style.display = 'none'; if (cohortChartInstance) { cohortChartInstance.destroy(); cohortChartInstance = null; } return; }
+  panel.style.display = '';
+  const t = T();
+  const ctx = document.getElementById('cohortChart').getContext('2d');
+  if (cohortChartInstance) cohortChartInstance.destroy();
+  cohortChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: c.map(e => monthLabel(e[0])), datasets: [
+      { label: 'Nieuwe volgers', data: c.map(e => e[1]), backgroundColor: hexA(t.followers, 0.85), borderRadius: 3, maxBarThickness: 26 },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: legendOpts(false), tooltip: baseTooltip() }, scales: baseScales(true) }
   });
 }
 
 function renderAll() {
   if (!history.length) {
-    // Nieuw account zonder metingen: nog geen API-token, of de eerste run moet
-    // nog draaien. Leeg tonen in plaats van crashen.
     document.getElementById('headerSubtitle').textContent = 'Nog geen dagelijkse metingen voor dit profiel';
     document.getElementById('summaryCards').innerHTML = '<div class="empty-state">Nog geen volgersaantallen voor dit profiel. Zodra het Instagram API-token is ingesteld, verschijnen ze hier elke ochtend automatisch.</div>';
-    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-    if (growthChartInstance) { growthChartInstance.destroy(); growthChartInstance = null; }
+    document.getElementById('insightsRow').innerHTML = '';
+    [chartInstance, growthChartInstance, weeklyChartInstance].forEach(c => { if (c) c.destroy(); });
+    chartInstance = growthChartInstance = weeklyChartInstance = null;
     return;
   }
   const latest = history[history.length - 1];
-  document.getElementById('headerSubtitle').textContent = `Laatste update: ${latest.date} · ${history.length} meting${history.length === 1 ? '' : 'en'}`;
-  renderCards();
-  renderCharts();
+  document.getElementById('headerSubtitle').textContent = `Laatste update: ${fmtDate(latest.date)} · ${history.length} meting${history.length === 1 ? '' : 'en'}`;
+  renderKpis();
+  renderInsights();
+  renderHistoryChart();
+  renderGrowthChart();
+  renderWeeklyChart();
 }
 
 // =====================================================================
@@ -388,11 +783,6 @@ function renderAll() {
 function ghToken() {
   return localStorage.getItem('ig_dash_gh_token') || sessionStorage.getItem('ig_dash_gh_token_session') || '';
 }
-
-// ---- opslagformaat v2 (spiegelt agent/lib/store.js) ----
-// v1 was een array van volledige snapshots. Die groeide met ~190 KB per meting;
-// bij de automatische agent (elke 4 dagen) zou dat het dashboard binnen een jaar
-// onbruikbaar traag maken. v2 bewaart de huidige stand plus een event-log.
 
 function emptyNameStore() {
   return { v: 2, current: null, previous: null, events: [], measurements: [] };
@@ -446,7 +836,6 @@ function applyNameSnapshot(store, snap) {
 function normalizeNameStore(raw) {
   if (!raw) return emptyNameStore();
   if (Array.isArray(raw)) {
-    // Oude v1-data uit een eerdere upload: eenmalig omzetten.
     let s = emptyNameStore();
     for (const snap of raw) s = applyNameSnapshot(s, snap);
     return s;
@@ -519,8 +908,6 @@ function setNamesStatus(msg, kind) {
 function toSet(pairs) { return new Set(pairs.map(p => p[0])); }
 function toMap(pairs) { const m = new Map(); pairs.forEach(p => m.set(p[0], p[1])); return m; }
 
-// De export levert datums als "jul 23, 2026 11:55 pm" (HTML) of "2026-07-23"
-// (JSON, wat de agent aanvraagt). Beide moeten hier doorheen kunnen.
 function parseExportDate(s) {
   if (!s || s === '—') return null;
   const iso = /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : String(s).replace(/(am|pm)$/i, m => ' ' + m);
@@ -528,11 +915,6 @@ function parseExportDate(s) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// Instagram kapt de volgersgeschiedenis in de export af: bij dit account begon
-// de volgerslijst pas 8 maanden terug, terwijl de volglijst 5 jaar teruggaat.
-// Wie jou vóór die grens is gaan volgen ontbreekt, en verschijnt dus ten
-// onrechte als "volgt niet terug". We kunnen ze niet terughalen, maar we kunnen
-// wel ophouden er stellige uitspraken over te doen.
 function followersCutoff(followers) {
   let oldest = null;
   for (const [, since] of followers || []) {
@@ -556,9 +938,6 @@ function diffAllNames() {
   const fans = [...curFollowers].filter(u => !curFollowing.has(u));
   const mutuals = [...curFollowers].filter(u => curFollowing.has(u));
 
-  // Volgde jij iemand al vóór het begin van de volgerslijst, dan kan de export
-  // niet laten zien of die persoon jou terugvolgt. Zulke gevallen apart houden
-  // in plaats van ze bij "volgt niet terug" te gooien.
   const cutoff = followersCutoff(latest.followers);
   const unverifiable = new Set();
   if (cutoff) {
@@ -570,9 +949,6 @@ function diffAllNames() {
   const notFollowingBackSure = notFollowingBack.filter(u => !unverifiable.has(u));
   const notFollowingBackUnsure = notFollowingBack.filter(u => unverifiable.has(u));
 
-  // Wijzigingen sinds de vorige meting lezen we rechtstreeks uit de event-log
-  // van de laatste meetdatum; twee lijsten van duizenden namen vergelijken
-  // hoeft daardoor niet meer.
   const onLatest = t => s.events.filter(e => e[0] === latest.date && e[2] === t).map(e => e[1]);
 
   const timeline = s.events
@@ -605,16 +981,18 @@ const EVENT_LABELS = {
 function renderNameCards(d) {
   const el = document.getElementById('nameCards');
   if (!d) { el.innerHTML = ''; return; }
+  const engagement = d.counts.followers ? Math.round((d.counts.mutuals / d.counts.followers) * 100) : 0;
   const cards = [
-    { label: 'Elkaar volgend', value: d.counts.mutuals, sub: 'volgen elkaar wederzijds' },
+    { label: 'Elkaar volgend', value: d.counts.mutuals, sub: `${engagement}% van je volgers volg je terug` },
     { label: 'Jij volgt, geen terugvolg', value: d.counts.notFollowingBack, sub: 'accounts die jij volgt' },
     { label: 'Fans zonder terugvolg', value: d.counts.fans, sub: 'volgen jou, jij hen niet' },
+    { label: 'Nieuw sinds vorige export', value: d.newFollowers.length, sub: `${d.lostFollowers.length} ontvolgden je` },
   ];
   el.innerHTML = cards.map(c => `
-    <div class="card">
-      <div class="label">${c.label}</div>
-      <div class="value">${c.value.toLocaleString('nl-NL')}</div>
-      <div class="delta flat">${c.sub}</div>
+    <div class="kpi">
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-value">${c.value.toLocaleString('nl-NL')}</div>
+      <div class="kpi-sub kpi-note">${c.sub}</div>
     </div>
   `).join('');
 }
@@ -671,7 +1049,7 @@ function renderNameTabs(d) {
   const pagesEl = document.getElementById('nameTabPages');
   if (!d) {
     barEl.innerHTML = '';
-    pagesEl.innerHTML = '<div class="empty-state">Nog geen naamlijst-data. Upload hierboven je export-zip om te beginnen.</div>';
+    pagesEl.innerHTML = '<div class="empty-state">Nog geen naamlijst-data. Upload hieronder je export-zip om te beginnen.</div>';
     return;
   }
   const tabs = [
@@ -716,16 +1094,15 @@ function renderNamesAll() {
   const d = diffAllNames();
   renderNameCards(d);
   renderNameTabs(d);
+  renderCohortChart();
   const infoEl = document.getElementById('namesLastUpdate');
   const s = normalizeNameStore(nameStore);
   infoEl.textContent = s.current
-    ? `Laatste naamlijst-update: ${s.current.date} · ${s.measurements.length} meting${s.measurements.length === 1 ? '' : 'en'} verwerkt`
+    ? `Laatste naamlijst-update: ${fmtDate(s.current.date)} · ${s.measurements.length} meting${s.measurements.length === 1 ? '' : 'en'} verwerkt`
     : 'Nog geen naamlijst opgehaald.';
   renderAgentBanner();
 }
 
-// Laat zien of de lokale agent nog draait. Zonder dit merk je pas weken later
-// dat je Instagram-sessie is verlopen en de namen stil zijn blijven staan.
 function renderAgentBanner() {
   const el = document.getElementById('agentBanner');
   if (!el) return;
@@ -767,8 +1144,6 @@ async function commitNameSnapshot(parsed, sourceLabel) {
     date: today, followers: parsed.followers, following: parsed.following,
     pending: parsed.pending || [], recentRequests: parsed.recentRequests || [], recentlyUnfollowed: parsed.recentlyUnfollowed || [],
   };
-  // Zelfde opbouw als de agent, zodat handmatige en automatische metingen door
-  // elkaar heen kunnen lopen zonder de event-log te ontregelen.
   const nextStore = applyNameSnapshot(nameStore, entry);
 
   setNamesStatus('Opslaan naar GitHub...', 'info');
