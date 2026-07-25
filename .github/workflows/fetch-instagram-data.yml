@@ -2,7 +2,10 @@ name: Fetch Instagram Data
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    # Bewust niet op het hele uur: geplande runs op :00 worden door GitHub bij
+    # drukte vaak vertraagd of overgeslagen. Een "rustige" minuut is veel
+    # betrouwbaarder. 06:17 UTC = 08:17 in de zomer (CEST), 07:17 in de winter.
+    - cron: '17 6 * * *'
   workflow_dispatch: {}
 
 permissions:
