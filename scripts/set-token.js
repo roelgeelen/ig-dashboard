@@ -7,6 +7,13 @@
 //
 // Daarna: het aangepaste bestand data/<slug>/token.enc.json committen en pushen.
 // Vanaf dan draait alles automatisch, net als bij het eerste account.
+//
+// Benodigde rechten (scopes) bij het aanmaken van het token:
+//   - instagram_business_basic            -> volgers, volgend, berichten
+//   - instagram_business_manage_insights  -> bereik, profielweergaven, interacties
+//                                            en de statistieken per bericht
+// Zonder het tweede recht werkt alles behalve de sectie "Bereik & activiteit";
+// die blijft leeg tot je het token opnieuw mét dat recht aanmaakt en hier klaarzet.
 
 const fs = require('fs');
 const path = require('path');

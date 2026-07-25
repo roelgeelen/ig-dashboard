@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { encrypt, decrypt } = require('./crypto-utils');
 const { readAccounts } = require('./accounts');
+const { fetchAccountInsights, fetchTopPosts } = require('./insights');
 
 const PASSPHRASE = process.env.ENCRYPTION_PASSPHRASE;
 if (!PASSPHRASE) {
@@ -18,6 +19,8 @@ async function updateAccount(account) {
   const dir = path.join(DATA_DIR, account.slug);
   const tokenFile = path.join(dir, 'token.enc.json');
   const historyFile = path.join(dir, 'history.enc.json');
+  const insightsFile = path.join(dir, 'insights.enc.json');
+  const postsFile = path.join(dir, 'posts.enc.json');
 
   if (!fs.existsSync(tokenFile)) {
     console.log(`[${account.slug}] Nog geen token ingesteld, overgeslagen. ` +
@@ -80,7 +83,55 @@ async function updateAccount(account) {
   fs.writeFileSync(historyFile, JSON.stringify({ v: 1, data: encrypt(PASSPHRASE, history) }, null, 2) + '\n');
 
   console.log(`[${account.slug}] Klaar:`, JSON.stringify(entry));
+
+  // Insights en best presterende berichten zijn een bonus bovenop de dagelijkse
+  // aantallen: lukt het niet (bijvoorbeeld omdat het token de insights-rechten
+  // mist), dan loggen we dat en gaan we door. Een lege insights is geen fout.
+  await updateInsights(account, insightsFile, meJson.id, newToken, today);
+  await updatePosts(account, postsFile, meJson.id, newToken, today);
+
   return true;
+}
+
+// Dagelijkse account-insights bijwerken (bereik, profielweergaven, interacties).
+async function updateInsights(account, insightsFile, igId, token, today) {
+  try {
+    const ins = await fetchAccountInsights(igId, token);
+    const keys = Object.keys(ins);
+    if (!keys.length) {
+      console.log(`[${account.slug}] Geen insights beschikbaar (token mist mogelijk de insights-rechten), overgeslagen.`);
+      return;
+    }
+    let hist = [];
+    try {
+      const blob = JSON.parse(fs.readFileSync(insightsFile, 'utf8'));
+      hist = decrypt(PASSPHRASE, blob.data);
+      if (!Array.isArray(hist)) hist = [];
+    } catch (e) { hist = []; }
+    const rec = Object.assign({ date: today }, ins);
+    const idx = hist.findIndex(h => h.date === today);
+    if (idx >= 0) hist[idx] = rec; else hist.push(rec);
+    fs.writeFileSync(insightsFile, JSON.stringify({ v: 1, data: encrypt(PASSPHRASE, hist) }, null, 2) + '\n');
+    console.log(`[${account.slug}] Insights bijgewerkt: ${keys.join(', ')}.`);
+  } catch (e) {
+    console.warn(`[${account.slug}] Insights ophalen mislukt (overgeslagen):`, e.message || e);
+  }
+}
+
+// Momentopname van de recente, best presterende berichten bijwerken.
+async function updatePosts(account, postsFile, igId, token, today) {
+  try {
+    const posts = await fetchTopPosts(igId, token);
+    if (!posts.length) {
+      console.log(`[${account.slug}] Geen berichten opgehaald, overgeslagen.`);
+      return;
+    }
+    const snapshot = { date: today, posts };
+    fs.writeFileSync(postsFile, JSON.stringify({ v: 1, data: encrypt(PASSPHRASE, snapshot) }, null, 2) + '\n');
+    console.log(`[${account.slug}] Berichten bijgewerkt: ${posts.length} stuks.`);
+  } catch (e) {
+    console.warn(`[${account.slug}] Berichten ophalen mislukt (overgeslagen):`, e.message || e);
+  }
 }
 
 async function main() {

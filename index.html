@@ -89,6 +89,21 @@
   .insight-value { font-size:22px; font-weight:650; letter-spacing:-.01em; margin-top:5px; }
   .insight-note { font-size:12px; color:var(--muted); margin-top:3px; }
 
+  /* ---- Best presterende berichten ---- */
+  .post-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:14px; }
+  .post-card { display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); text-decoration:none; color:inherit; transition:transform .12s, box-shadow .12s; }
+  .post-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+  .post-thumb { position:relative; aspect-ratio:1/1; background:linear-gradient(135deg,var(--accent-soft),var(--chip)); background-size:cover; background-position:center; display:grid; place-items:center; }
+  .post-thumb .ph-icon { font-size:30px; opacity:.5; }
+  .post-badge { position:absolute; top:8px; left:8px; background:rgba(0,0,0,0.62); color:#fff; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; padding:3px 7px; border-radius:6px; }
+  .post-rank { position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:999px; background:var(--accent); color:#fff; font-size:11px; font-weight:700; display:grid; place-items:center; }
+  .post-body { padding:11px 13px 13px; display:flex; flex-direction:column; gap:7px; }
+  .post-caption { font-size:12.5px; color:var(--sec); line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.2em; }
+  .post-date { font-size:11px; color:var(--muted); }
+  .post-stats { display:flex; flex-wrap:wrap; gap:5px; margin-top:1px; }
+  .stat-chip { font-size:11.5px; font-weight:600; color:var(--sec); background:var(--chip); border-radius:7px; padding:3px 7px; display:inline-flex; align-items:center; gap:4px; }
+  .stat-chip svg { width:12px; height:12px; opacity:.75; }
+
   /* ---- Panelen ---- */
   .panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:16px; box-shadow:var(--shadow); }
   .panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
@@ -242,6 +257,24 @@
       <div style="height:220px;"><canvas id="cohortChart"></canvas></div>
     </div>
 
+    <div id="apiSection" style="display:none;">
+      <div class="section-title">Bereik &amp; activiteit</div>
+      <div class="kpi-grid" id="apiKpis"></div>
+      <div class="panel" id="reachPanel" style="display:none; margin-top:16px;">
+        <div class="panel-head"><div><h2>Bereik &amp; profielweergaven</h2><div class="sub">Dagelijkse Instagram-insights</div></div></div>
+        <div style="height:240px;"><canvas id="reachChart"></canvas></div>
+      </div>
+      <div class="section-title" id="postsTitle" style="display:none;">Best presterende berichten</div>
+      <div class="post-grid" id="postGrid"></div>
+    </div>
+
+    <div class="panel" id="apiEmpty" style="display:none;">
+      <div class="panel-head"><div><h2>Bereik, weergaven &amp; postprestaties</h2><div class="sub">Nog niet beschikbaar voor dit profiel</div></div></div>
+      <div class="empty-state" style="text-align:left; padding:8px 2px;">
+        Deze sectie toont je dagelijkse bereik, profielweergaven, interacties en je best presterende berichten. Daarvoor heeft je Instagram-token het recht <code>instagram_business_manage_insights</code> nodig — het huidige token heeft dat (nog) niet. Maak het token opnieuw aan met dat recht en zet het klaar met <code>scripts/set-token.js</code> (zie de README). Zodra de dagelijkse run insights binnenhaalt, verschijnen ze hier vanzelf.
+      </div>
+    </div>
+
     <div class="section-title">Relaties</div>
     <div class="panel">
       <div class="agent-banner idle" id="agentBanner">Agent-status wordt geladen…</div>
@@ -339,6 +372,8 @@ let PASSPHRASE = null;
 let history = [];
 let nameStore = null;
 let agentStatus = null;
+let insightsHist = [];
+let postsSnap = null;
 let rangeDays = 'all';
 
 // ---- thema ----
@@ -364,7 +399,7 @@ function applyTheme(mode) {
   document.documentElement.setAttribute('data-theme', mode);
   localStorage.setItem('ig_dash_theme', mode);
   setThemeIcon(mode);
-  if (PASSPHRASE) { renderAll(); renderNamesAll(); }
+  if (PASSPHRASE) { renderAll(); renderNamesAll(); renderApiInsights(); }
 }
 (function initTheme() {
   let m = localStorage.getItem('ig_dash_theme');
@@ -420,6 +455,8 @@ async function fetchDecrypt(path, fallback) {
 
 async function loadAccount() {
   history = await fetchDecrypt(accountPath('history.enc.json'), []);
+  insightsHist = await fetchDecrypt(accountPath('insights.enc.json'), []);
+  postsSnap = await fetchDecrypt(accountPath('posts.enc.json'), null);
   await loadNamesFromGitHub();
   await loadAgentStatus();
   const sel = document.getElementById('accountSwitcher');
@@ -428,6 +465,7 @@ async function loadAccount() {
   document.getElementById('acctTitle').textContent = acct ? acct.label : 'Dashboard';
   renderAll();
   renderNamesAll();
+  renderApiInsights();
 }
 
 async function unlockDashboard() {
@@ -568,6 +606,13 @@ function followerCohort() {
 
 // ---- opmaakhelpers ----
 function fmtN(n) { return (typeof n === 'number') ? n.toLocaleString('nl-NL') : n; }
+function fmtCompact(n) {
+  if (typeof n !== 'number') return n;
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1).replace('.', ',') + 'M';
+  if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(0) + 'K';
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1).replace('.', ',') + 'K';
+  return n.toLocaleString('nl-NL');
+}
 function signed(n) { return (n > 0 ? '+' : '') + n.toLocaleString('nl-NL'); }
 function deltaClass(n) { return n > 0 ? 'up' : (n < 0 ? 'down' : 'flat'); }
 function fmtDate(s) {
@@ -676,7 +721,7 @@ function legendOpts(display) {
   return { display: display, position: 'top', align: 'end', labels: { color: t.sec, usePointStyle: true, pointStyleWidth: 10, boxHeight: 7, padding: 14, font: { size: 12 } } };
 }
 
-let chartInstance = null, growthChartInstance = null, weeklyChartInstance = null, cohortChartInstance = null;
+let chartInstance = null, growthChartInstance = null, weeklyChartInstance = null, cohortChartInstance = null, reachChartInstance = null;
 
 function filteredHistory() {
   if (rangeDays === 'all' || !history.length) return history;
@@ -774,6 +819,139 @@ function renderAll() {
   renderHistoryChart();
   renderGrowthChart();
   renderWeeklyChart();
+}
+
+// =====================================================================
+// ---- Bereik & activiteit (Instagram-insights + berichten) ----
+// =====================================================================
+const INSIGHT_LABELS = {
+  reach: 'Bereik', profile_views: 'Profielweergaven', accounts_engaged: 'Betrokken accounts',
+  total_interactions: 'Interacties', likes: 'Likes', comments: 'Reacties', saves: 'Opgeslagen',
+  shares: 'Gedeeld', replies: 'Antwoorden', views: 'Weergaven',
+};
+
+function insightsInWindow(days) {
+  if (!insightsHist.length) return [];
+  const latest = insightsHist[insightsHist.length - 1];
+  const cutoff = Date.parse(latest.date) - days * 86400000;
+  return insightsHist.filter(h => Date.parse(h.date) >= cutoff);
+}
+function sumMetric(rows, metric) {
+  let sum = 0, seen = false;
+  for (const r of rows) { if (typeof r[metric] === 'number') { sum += r[metric]; seen = true; } }
+  return seen ? sum : null;
+}
+
+function renderApiInsights() {
+  const hasInsights = insightsHist && insightsHist.length > 0;
+  const posts = (postsSnap && Array.isArray(postsSnap.posts)) ? postsSnap.posts : [];
+  const hasPosts = posts.length > 0;
+
+  document.getElementById('apiSection').style.display = (hasInsights || hasPosts) ? '' : 'none';
+  document.getElementById('apiEmpty').style.display = (hasInsights || hasPosts) ? 'none' : '';
+  if (!hasInsights && !hasPosts) {
+    if (reachChartInstance) { reachChartInstance.destroy(); reachChartInstance = null; }
+    return;
+  }
+
+  // KPI's over de laatste 30 dagen
+  const kpiEl = document.getElementById('apiKpis');
+  if (hasInsights) {
+    kpiEl.style.display = '';
+    const rows = insightsInWindow(30);
+    const reach = sumMetric(rows, 'reach');
+    const pv = sumMetric(rows, 'profile_views');
+    let inter = sumMetric(rows, 'total_interactions');
+    if (inter == null) {
+      const parts = ['likes', 'comments', 'saves', 'shares'].map(m => sumMetric(rows, m)).filter(v => v != null);
+      inter = parts.length ? parts.reduce((a, b) => a + b, 0) : null;
+    }
+    const eng = (reach && inter != null) ? (inter / reach * 100) : null;
+    const tiles = [];
+    if (reach != null) tiles.push(kpiTile('Bereik (30d)', fmtCompact(reach), '<span class="kpi-note">unieke accounts bereikt</span>', '', false));
+    if (pv != null) tiles.push(kpiTile('Profielweergaven (30d)', fmtCompact(pv), '<span class="kpi-note">bezoeken aan je profiel</span>', '', false));
+    if (inter != null) tiles.push(kpiTile('Interacties (30d)', fmtCompact(inter), '<span class="kpi-note">likes, reacties, saves, shares</span>', '', false));
+    if (eng != null) tiles.push(kpiTile('Engagement', eng.toFixed(1).replace('.', ',') + '%', '<span class="kpi-note">interacties per bereikt account</span>', '', false));
+    kpiEl.innerHTML = tiles.join('') || '';
+  } else {
+    kpiEl.style.display = 'none';
+    kpiEl.innerHTML = '';
+  }
+
+  renderReachChart();
+  renderTopPosts(posts);
+}
+
+function renderReachChart() {
+  const panel = document.getElementById('reachPanel');
+  const rows = insightsHist.filter(h => typeof h.reach === 'number' || typeof h.profile_views === 'number');
+  if (rows.length < 2) { panel.style.display = 'none'; if (reachChartInstance) { reachChartInstance.destroy(); reachChartInstance = null; } return; }
+  panel.style.display = '';
+  const t = T();
+  const labels = rows.map(h => h.date);
+  const ds = [];
+  if (rows.some(h => typeof h.reach === 'number'))
+    ds.push({ label: 'Bereik', data: rows.map(h => h.reach ?? null), borderColor: t.followers, backgroundColor: hexA(t.followers, 0.10), borderWidth: 2, tension: .25, fill: true, pointRadius: 0, pointHoverRadius: 5, spanGaps: true });
+  if (rows.some(h => typeof h.profile_views === 'number'))
+    ds.push({ label: 'Profielweergaven', data: rows.map(h => h.profile_views ?? null), borderColor: t.following, backgroundColor: hexA(t.following, 0.07), borderWidth: 2, tension: .25, fill: true, pointRadius: 0, pointHoverRadius: 5, spanGaps: true });
+  const ctx = document.getElementById('reachChart').getContext('2d');
+  if (reachChartInstance) reachChartInstance.destroy();
+  reachChartInstance = new Chart(ctx, {
+    type: 'line', data: { labels, datasets: ds },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: legendOpts(ds.length > 1), tooltip: baseTooltip() }, scales: baseScales(true) }
+  });
+}
+
+const STAT_ICONS = {
+  like: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-10-9.3C.3 8 2 4.5 5.3 4.5c2 0 3.3 1.2 4.2 2.4l.5.7.5-.7c.9-1.2 2.2-2.4 4.2-2.4 3.3 0 5 3.5 3.3 7.2C19.5 16.4 12 21 12 21z"/></svg>',
+  comment: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4V5a1 1 0 0 1 1-1z"/></svg>',
+  reach: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg>',
+  save: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>',
+};
+function statChip(icon, val) { return `<span class="stat-chip">${STAT_ICONS[icon]}${fmtCompact(val)}</span>`; }
+
+function postScore(p) {
+  if (typeof p.total_interactions === 'number') return p.total_interactions;
+  return (p.like_count || 0) + (p.comments_count || 0) + (p.saves || p.saved || 0);
+}
+function mediaLabel(p) {
+  const t = (p.media_product_type || p.media_type || '').toUpperCase();
+  if (t === 'REELS' || t === 'VIDEO') return 'Reel';
+  if (t === 'CAROUSEL_ALBUM' || t === 'CAROUSEL') return 'Carrousel';
+  return 'Foto';
+}
+function mediaIcon(p) {
+  const l = mediaLabel(p);
+  return l === 'Reel' ? '🎬' : (l === 'Carrousel' ? '🖼️' : '📷');
+}
+
+function renderTopPosts(posts) {
+  const grid = document.getElementById('postGrid');
+  const title = document.getElementById('postsTitle');
+  if (!posts.length) { title.style.display = 'none'; grid.innerHTML = ''; return; }
+  title.style.display = '';
+  const ranked = posts.slice().sort((a, b) => postScore(b) - postScore(a)).slice(0, 9);
+  grid.innerHTML = ranked.map((p, i) => {
+    const thumb = p.thumbnail_url ? ` style="background-image:url('${p.thumbnail_url.replace(/'/g, "%27")}')"` : '';
+    const chips = [];
+    if (typeof p.like_count === 'number') chips.push(statChip('like', p.like_count));
+    if (typeof p.comments_count === 'number') chips.push(statChip('comment', p.comments_count));
+    if (typeof p.reach === 'number') chips.push(statChip('reach', p.reach));
+    const sv = (typeof p.saved === 'number') ? p.saved : (typeof p.saves === 'number' ? p.saves : null);
+    if (sv != null) chips.push(statChip('save', sv));
+    const cap = p.caption ? p.caption.replace(/</g, '&lt;') : '<span class="kpi-note">Geen bijschrift</span>';
+    const dt = p.timestamp ? fmtDate(p.timestamp.slice(0, 10)) : '';
+    const href = p.permalink || '#';
+    return `<a class="post-card" href="${href}" target="_blank" rel="noopener">
+      <div class="post-thumb"${thumb}>${p.thumbnail_url ? '' : `<span class="ph-icon">${mediaIcon(p)}</span>`}<span class="post-badge">${mediaLabel(p)}</span><span class="post-rank">${i + 1}</span></div>
+      <div class="post-body">
+        <div class="post-caption">${cap}</div>
+        <div class="post-date">${dt}</div>
+        <div class="post-stats">${chips.join('')}</div>
+      </div>
+    </a>`;
+  }).join('');
 }
 
 // =====================================================================

@@ -24,6 +24,15 @@ Een account toevoegen:
    ```
    Vanaf dan ververst de dagelijkse Action het token zelf en haalt hij de aantallen op, net als bij het eerste account.
 
+## Bereik, weergaven en postprestaties (insights)
+
+Naast volgers en berichten kan het dashboard ook je **bereik**, **profielweergaven**, **interacties** en je **best presterende berichten** tonen. Die komen uit de insights-endpoints van de Instagram Graph API en vragen een extra recht op je token:
+
+- `instagram_business_basic` — volgers, volgend, berichten (heb je al)
+- `instagram_business_manage_insights` — bereik, weergaven, interacties en per-bericht-statistieken
+
+Maak je long-lived token opnieuw aan met **beide** scopes en zet het klaar met `scripts/set-token.js` (zelfde commando als hierboven). De dagelijkse run haalt de insights daarna vanzelf op en schrijft ze naar `data/<slug>/insights.enc.json` en `data/<slug>/posts.enc.json`. Zolang het recht ontbreekt blijft die dashboardsectie netjes leeg — de rest blijft gewoon werken. Insights ophalen faalt nooit de dagelijkse volgersmeting: lukt het niet, dan wordt het stilzwijgend overgeslagen.
+
 ## Eenmalig installeren
 
 ```bash
