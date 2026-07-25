@@ -37,5 +37,19 @@ jobs:
             echo "Geen wijzigingen om te committen."
           else
             git commit -m "Dagelijkse Instagram data-update"
-            git push
+            # main kan intussen verschoven zijn (een andere push, of de
+            # naamlijst-agent die via de API commit). Rebase de update daar
+            # bovenop en probeer het een paar keer, zodat zo'n botsing geen
+            # meting kost in plaats van de run te laten falen.
+            pushed=false
+            for i in 1 2 3 4 5; do
+              if git push; then pushed=true; break; fi
+              echo "Push geweigerd (poging $i), remote ophalen en rebasen..."
+              git pull --rebase origin main || true
+              sleep 2
+            done
+            if [ "$pushed" != true ]; then
+              echo "Kon niet pushen na meerdere pogingen."
+              exit 1
+            fi
           fi
