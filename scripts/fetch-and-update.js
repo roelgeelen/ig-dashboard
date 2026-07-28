@@ -74,7 +74,10 @@ async function updateAccount(account) {
     console.warn(`[${account.slug}] Kon bestaande geschiedenis niet lezen, begin opnieuw:`, e.message);
     history = [];
   }
-  const today = new Date().toISOString().slice(0, 10);
+  // Datum op Nederlandse tijd bepalen, niet UTC. Anders belandt een run rond
+  // middernacht (Nederlandse tijd) op de vorige dag, want dan is het in UTC nog de
+  // vorige dag. 'en-CA' levert het YYYY-MM-DD-formaat; de tijdzone regelt zomer-/wintertijd.
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(new Date());
   const entry = { date: today, followers_count: meJson.followers_count, follows_count: meJson.follows_count };
   if (meJson.media_count != null) entry.media_count = meJson.media_count;
   const idx = history.findIndex(h => h.date === today);
