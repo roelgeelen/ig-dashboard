@@ -12,6 +12,18 @@ if (!PASSPHRASE) {
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
+// De datum van de meting in de tijdzone van de eigenaar (Nederland), niet in
+// UTC. new Date().toISOString() geeft de UTC-datum: draait de cron rond
+// middernacht Nederlandse tijd, dan is het in UTC nog de vorige dag en zou de
+// meting van vandaag op de datum van gisteren belanden. Europe/Amsterdam houdt
+// automatisch rekening met zomer-/wintertijd.
+function localDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
 // Haalt voor één account het volgersaantal op en werkt de geschiedenis bij.
 // Geeft true terug als het gelukt is, false als het account (nog) geen token
 // heeft en dus overgeslagen wordt.
@@ -74,7 +86,7 @@ async function updateAccount(account) {
     console.warn(`[${account.slug}] Kon bestaande geschiedenis niet lezen, begin opnieuw:`, e.message);
     history = [];
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   const entry = { date: today, followers_count: meJson.followers_count, follows_count: meJson.follows_count };
   if (meJson.media_count != null) entry.media_count = meJson.media_count;
   const idx = history.findIndex(h => h.date === today);
