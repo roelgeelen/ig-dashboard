@@ -235,19 +235,105 @@ async function requestExport(page, { username, dryRun = false } = {}) {
   return true;
 }
 
-// Kijkt of er een export klaarstaat. Zo ja: downloadt hem. Zo nee: null, en
-// probeert de agent het bij de volgende dagelijkse run opnieuw. Er wordt nooit
-// gewacht in een lus.
-async function tryDownloadReady(page) {
+// Zoekt de "Downloaden"-knop die bij dit account hoort. Met meerdere gekoppelde
+// profielen staan er meerdere exports op "Beschikbare downloads"; blind de eerste
+// knop pakken zou de export van het verkeerde profiel binnenhalen en die onder
+// dit account opslaan. Daarom scopen we op de kaart die de gebruikersnaam van dit
+// account noemt. Lukt koppelen niet maar staat er precies één export (één
+// profiel), dan is die knop hoe dan ook de juiste. Meerdere knoppen zonder match
+// leveren null op - liever opnieuw proberen dan het verkeerde profiel opslaan.
+async function findDownloadButton(page, identifiers, labels) {
+  return page.evaluateHandle(
+    ({ ids, labs }) => {
+      const vis = (el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const wantLabs = labs.map(norm);
+      const wantIds = ids.map(norm).filter(Boolean);
+
+      const buttons = [...document.querySelectorAll('[role=button],button,a,[role=link]')]
+        .filter(vis)
+        .filter((el) => {
+          const t = norm(el.innerText);
+          return wantLabs.some((w) => t === w || t.includes(w));
+        });
+      if (!buttons.length) return null;
+
+      // 1) Knop op de kaart die de gebruikersnaam van dit account noemt.
+      for (const btn of buttons) {
+        let el = btn;
+        for (let i = 0; i < 8 && el; i++) {
+          if (wantIds.some((id) => norm(el.innerText).includes(id))) return btn;
+          el = el.parentElement;
+        }
+      }
+      // 2) Precies één export op de pagina -> eenduidig, ook zonder naam-match.
+      if (buttons.length === 1) return buttons[0];
+      // 3) Meerdere exports en geen match -> niet gokken.
+      return null;
+    },
+    { ids: identifiers, labs: labels }
+  );
+}
+
+async function countDownloadButtons(page, labels) {
+  return page.evaluate((labs) => {
+    const vis = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const want = labs.map(norm);
+    return [...document.querySelectorAll('[role=button],button,a,[role=link]')]
+      .filter(vis)
+      .filter((el) => {
+        const t = norm(el.innerText);
+        return want.some((w) => t === w || t.includes(w));
+      }).length;
+  }, labels);
+}
+
+// Kijkt of er een export voor dit account klaarstaat. Zo ja: downloadt hem. Zo
+// nee: null, en probeert de agent het bij de volgende dagelijkse run opnieuw. Er
+// wordt nooit gewacht in een lus.
+async function tryDownloadReady(page, { username, slug } = {}) {
   await gotoDyi(page);
+
+  const labels = labelsFor('downloadReady');
+  const identifiers = [username].filter(Boolean);
+  const handle = await findDownloadButton(page, identifiers, labels);
+  const btn = handle.asElement();
+
+  if (!btn) {
+    // Onderscheid: geen enkele knop (export nog niet klaar) versus wel knoppen
+    // maar niet toe te wijzen aan dit profiel (dan niet gokken, wel vastleggen).
+    const count = await countDownloadButtons(page, labels);
+    if (count > 0) {
+      const shot = await screenshot(page, `download-ambigu-${slug || 'onbekend'}`);
+      log.warn(
+        `${count} downloadknop(pen) gevonden, maar geen kon aan "${username || slug}" worden gekoppeld. ` +
+          `Volgende run probeert opnieuw. Screenshot: ${shot}`
+      );
+    } else {
+      log.info('Nog geen export klaar om te downloaden voor dit account.');
+    }
+    return null;
+  }
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 120000 }).catch(() => null),
-    clickLabels(page, labelsFor('downloadReady')),
+    (async () => {
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click({ timeout: 15000 }).catch(async () => {
+        await btn.evaluate((n) => n.click());
+      });
+    })(),
   ]);
 
   if (!download) {
-    log.info('Nog geen export klaar om te downloaden.');
+    log.info('Downloadknop geklikt, maar geen download ontvangen; volgende run probeert opnieuw.');
     return null;
   }
 

@@ -2,11 +2,13 @@
 //
 //   Fase 1: voor elk account dat op een export wacht (PENDING) -> kijken of hij
 //           klaarstaat, en zo ja downloaden en verwerken -> IDLE.
-//   Fase 2: staat er daarna geen enkele export meer open, dan hoogstens EEN
-//           nieuwe export aanvragen, voor het account dat het langst geleden
-//           gemeten is. Instagram staat maar mondjesmaat exports toe, dus we
-//           belasten die limiet met niet meer dan één aanvraag per run. Over
-//           opeenvolgende dagen komen zo alle accounts om beurten aan bod.
+//   Fase 2: hoogstens EEN nieuwe export aanvragen, voor het IDLE-account dat het
+//           langst geleden gemeten is. Instagram staat maar mondjesmaat exports
+//           toe, dus we belasten die limiet met niet meer dan één aanvraag per
+//           run. Een account dat nog op zijn export wacht (PENDING) telt niet
+//           mee als kandidaat, maar blokkeert de andere accounts niet - de
+//           exportlimiet geldt per profiel. Over opeenvolgende dagen komen zo
+//           alle accounts om beurten aan bod.
 //
 // Er wordt nooit gewacht in een lus, dus een run duurt seconden.
 
@@ -108,7 +110,7 @@ async function handlePending(cfg, page, acc, sub) {
     }
   }
 
-  const result = await tryDownloadReady(page);
+  const result = await tryDownloadReady(page, { username: acc.username, slug: acc.slug });
   if (result) {
     await processDownload(cfg, acc.slug, sub, result.buffer);
     cleanupDownload(result.file);
@@ -147,43 +149,42 @@ async function main() {
     }
 
     // ---- Fase 2: hoogstens één nieuwe export aanvragen ----
-    const anyPending = accounts.some((a) => s.accounts[a.slug].phase === state.PENDING);
-    if (anyPending) {
-      log.info('Er staat nog een export open; geen nieuwe aangevraagd deze run.');
-    } else {
-      let target = null;
-      for (const acc of accounts) {
-        const sub = s.accounts[acc.slug];
-        if (sub.phase !== state.IDLE) continue;
-        const cur = await loadStore(cfg, acc.slug);
-        const age = store.daysSinceLastMeasurement(cur, today());
-        log.info(`[${acc.slug}] Laatste meting: ${store.lastMeasurementDate(cur) || 'geen'} (${age === Infinity ? 'nooit' : age + ' dagen geleden'}).`);
-        if ((force || age >= cfg.intervalDays) && (!target || age > target.age)) {
-          target = { acc, sub, age };
-        }
+    // Alleen IDLE-accounts komen in aanmerking. Een account dat nog op zijn
+    // export wacht valt hier vanzelf buiten, maar houdt de andere accounts niet
+    // langer tegen: de exportlimiet geldt per profiel, dus één vastzittend
+    // account mag een gezond account niet laten verhongeren.
+    let target = null;
+    for (const acc of accounts) {
+      const sub = s.accounts[acc.slug];
+      if (sub.phase !== state.IDLE) continue;
+      const cur = await loadStore(cfg, acc.slug);
+      const age = store.daysSinceLastMeasurement(cur, today());
+      log.info(`[${acc.slug}] Laatste meting: ${store.lastMeasurementDate(cur) || 'geen'} (${age === Infinity ? 'nooit' : age + ' dagen geleden'}).`);
+      if ((force || age >= cfg.intervalDays) && (!target || age > target.age)) {
+        target = { acc, sub, age };
       }
+    }
 
-      if (!target) {
-        log.info(`Geen account is toe aan een nieuwe export (interval is ${cfg.intervalDays} dagen). Klaar.`);
-      } else {
-        try {
-          const submitted = await requestExport(page, { username: target.acc.username, dryRun });
-          if (submitted) {
-            target.sub.phase = state.PENDING;
-            target.sub.requestedAt = new Date().toISOString();
-            target.sub.lastError = null;
-            target.sub.consecutiveFailures = 0;
-            log.info(`[${target.acc.slug}] Export aangevraagd.`);
-          } else {
-            log.info(`[${target.acc.slug}] Droogloop: er is niets aangevraagd, de fase blijft ongewijzigd.`);
-          }
-          target.sub.sessionValid = true;
-        } catch (err) {
-          if (err instanceof SessionExpiredError) throw err;
-          target.sub.lastError = err.message;
-          target.sub.consecutiveFailures = (target.sub.consecutiveFailures || 0) + 1;
-          log.error(`[${target.acc.slug}] Aanvragen mislukt: ${err.message}`);
+    if (!target) {
+      log.info(`Geen IDLE-account is toe aan een nieuwe export (interval is ${cfg.intervalDays} dagen). Klaar.`);
+    } else {
+      try {
+        const submitted = await requestExport(page, { username: target.acc.username, dryRun });
+        if (submitted) {
+          target.sub.phase = state.PENDING;
+          target.sub.requestedAt = new Date().toISOString();
+          target.sub.lastError = null;
+          target.sub.consecutiveFailures = 0;
+          log.info(`[${target.acc.slug}] Export aangevraagd.`);
+        } else {
+          log.info(`[${target.acc.slug}] Droogloop: er is niets aangevraagd, de fase blijft ongewijzigd.`);
         }
+        target.sub.sessionValid = true;
+      } catch (err) {
+        if (err instanceof SessionExpiredError) throw err;
+        target.sub.lastError = err.message;
+        target.sub.consecutiveFailures = (target.sub.consecutiveFailures || 0) + 1;
+        log.error(`[${target.acc.slug}] Aanvragen mislukt: ${err.message}`);
       }
     }
   } catch (err) {
