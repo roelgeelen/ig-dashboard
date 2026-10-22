@@ -1,6 +1,8 @@
 # Agent — automatische naamlijsten
 
-Vraagt elke 4 dagen zelf de officiële Instagram data-export aan, haalt hem op, vergelijkt hem met de vorige en pusht het resultaat versleuteld naar GitHub. Daarna staat in het dashboard wie je is gaan volgen en wie je heeft ontvolgd, zonder dat je iets hebt gedaan.
+Vraagt de officiële Instagram data-export aan, haalt hem op, vergelijkt hem met de vorige en pusht het resultaat versleuteld naar GitHub. Daarna staat in het dashboard wie je is gaan volgen en wie je heeft ontvolgd.
+
+> **De agent draait alleen nog handmatig.** Er is geen geplande taak meer; je start hem zelf met `npm run run` (zie [Hoe hij draait](#hoe-hij-draait)).
 
 ## Waarom zo
 
@@ -78,24 +80,36 @@ Test of de browser-automatisering werkt, met een zichtbaar venster zodat je meek
 node run.js --headful --force
 ```
 
-Werkt dat, plan hem dan in:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install-task.ps1
-```
-
 ## Hoe hij draait
 
-Elke dag om 08:00, maar hij doet per keer maximaal één ding en is daarna klaar:
+Alleen als jij hem start:
+
+```bash
+npm run run
+```
+
+Per keer doet hij maximaal één ding en is daarna klaar:
 
 | Fase | Situatie | Actie |
 |---|---|---|
 | `IDLE` | laatste meting ≥ 4 dagen oud | export aanvragen → `PENDING` |
 | `IDLE` | recenter dan dat | niets, klaar in twee seconden |
 | `PENDING` | export staat klaar | downloaden, verwerken, pushen → `IDLE` |
-| `PENDING` | nog niet klaar | niets, morgen weer kijken |
+| `PENDING` | nog niet klaar | niets, later opnieuw starten |
 
-Er wordt nooit gewacht in een lus. Stond je PC om 08:00 uit, dan haalt de taak de gemiste run in zodra je hem weer aanzet.
+Een volledige meting kost dus twee keer starten: eerst vraagt hij de export aan, en zodra Instagram meldt dat hij klaarstaat (meestal binnen een paar uur) start je hem nog eens om hem op te halen. Met `--force` vraagt hij een export aan ook als de laatste meting jonger is dan 4 dagen.
+
+Er wordt nooit gewacht in een lus. Start hij zonder terminal (bijvoorbeeld via een oude taak in Windows Taakplanner), dan doet hij niets — tenzij je `--manual` meegeeft.
+
+### Oude geplande taak verwijderen
+
+Had je eerder `install-task.ps1` gedraaid, verwijder die taak dan:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Remove
+```
+
+`node setup.js` doet dit ook automatisch.
 
 ## Handige commando's
 
@@ -119,13 +133,12 @@ Het log staat in `agent/agent.log`.
 
 **"Sessie verlopen"** — draai `npm run login` opnieuw. Gebeurt ongeveer eens per kwartaal. Het dashboard laat dit ook zien met een rode balk, dus je komt er niet weken later achter.
 
-**Agent draait niet meer** — het dashboard toont een gele balk zodra er drie dagen geen run is geweest.
 
 ## Wat waar staat
 
 | Bestand | |
 |---|---|
-| `run.js` | de statemachine hierboven |
+| `run.js` | de statemachine hierboven (alleen handmatig) |
 | `login.js` | eenmalige zichtbare login |
 | `seed.js` | een bestaande export-zip inlezen, zonder browser (`--account` voor welk profiel) |
 | `status.js` | leest alleen, wijzigt niets (per account) |
@@ -139,4 +152,4 @@ Het log staat in `agent/agent.log`.
 
 ## Wat de agent niet doet
 
-Geen private API's, geen scraping, geen likes of volgacties. Hij klikt op de exportknop die Instagram zelf aanbiedt, hooguit eens per vier dagen, vanaf je eigen verbinding. Dat blijft geautomatiseerde bediening van hun website — technisch grijs gebied — maar het risicoprofiel is niet te vergelijken met tools die de interne API aanroepen.
+Geen private API's, geen scraping, geen likes of volgacties. Hij klikt op de exportknop die Instagram zelf aanbiedt, alleen als jij hem start en hooguit eens per vier dagen, vanaf je eigen verbinding. Dat blijft geautomatiseerde bediening van hun website — technisch grijs gebied — maar het risicoprofiel is niet te vergelijken met tools die de interne API aanroepen.

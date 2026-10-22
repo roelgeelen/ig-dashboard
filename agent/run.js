@@ -1,4 +1,4 @@
-// Dagelijkse run. Werkt elk gevolgd account bij en doet per keer weinig:
+// Handmatige run (de geplande taak is uitgezet). Werkt elk gevolgd account bij en doet per keer weinig:
 //
 //   Fase 1: voor elk account dat op een export wacht (PENDING) -> kijken of hij
 //           klaarstaat, en zo ja downloaden en verwerken -> IDLE.
@@ -30,6 +30,10 @@ const force = process.argv.includes('--force');
 // Loopt de wizard helemaal door maar stopt vlak voor "Export starten", zodat je
 // de knoppen kunt controleren zonder je exportlimiet op te maken.
 const dryRun = process.argv.includes('--dry-run');
+// De agent draait alleen nog als jij hem zelf start. Een start zonder terminal
+// (bv. een achtergebleven taak in Windows Taakplanner) doet niets, tenzij je
+// expliciet --manual meegeeft.
+const manual = process.argv.includes('--manual') || Boolean(process.stdout.isTTY);
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -118,6 +122,11 @@ async function handlePending(cfg, page, acc, sub) {
 }
 
 async function main() {
+  if (!manual) {
+    log.warn('Gestart zonder terminal (geplande taak?) - overgeslagen. De agent draait alleen nog handmatig. ' +
+      'Verwijder de taak met: powershell -ExecutionPolicy Bypass -File .\\install-task.ps1 -Remove');
+    return;
+  }
   const cfg = env.load();
   const { accounts, default: defaultSlug } = await loadAccounts(cfg);
   log.info(`Accounts: ${accounts.map((a) => a.username).join(', ')}.`);

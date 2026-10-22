@@ -189,17 +189,15 @@ async function main() {
     say('  [4/5] Basismeting : geen export-zip gevonden in de map exports/, overgeslagen.');
   }
 
-  // ---- 4. Geplande taak ----
+  // ---- 5. Geen geplande taak ----
+  // De agent draait alleen nog handmatig. Een eventueel eerder aangemaakte taak
+  // in Windows Taakplanner ruimen we hier op.
   say('');
-  const antwoord = await ask('  [5/5] Dagelijkse taak in Windows Taakplanner zetten? [J/n] ');
-  if (!/^n/i.test(antwoord)) {
-    try {
-      execSync('powershell -ExecutionPolicy Bypass -File install-task.ps1', { cwd: AGENT_DIR, stdio: 'inherit' });
-    } catch {
-      say('        Inplannen mislukt. Handmatig: powershell -ExecutionPolicy Bypass -File .\\install-task.ps1');
-    }
-  } else {
-    say('        Overgeslagen.');
+  say('  [5/5] Geplande taak: de agent draait alleen handmatig (npm run run).');
+  try {
+    execSync('powershell -ExecutionPolicy Bypass -File install-task.ps1 -Remove', { cwd: AGENT_DIR, stdio: 'inherit' });
+  } catch {
+    // Geen PowerShell of geen taak - niets op te ruimen.
   }
 
   say('');

@@ -1,3 +1,7 @@
+# LET OP: de agent draait bewust alleen nog handmatig (npm run run). Gebruik dit
+# script vooral om een eerder aangemaakte taak te verwijderen (-Remove). Een
+# taak die toch nog start doet niets, tenzij run.js --manual meekrijgt.
+#
 # Registreert de dagelijkse taak in Windows Taakplanner.
 # Draaien met:  powershell -ExecutionPolicy Bypass -File .\install-task.ps1
 # Verwijderen:  powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Remove

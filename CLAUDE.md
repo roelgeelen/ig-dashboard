@@ -17,13 +17,15 @@ Er zijn drie losse onderdelen:
    (`.github/workflows/fetch-instagram-data.yml`, cron `17 6 * * *` UTC). Haalt via
    de Instagram Graph API het volgersaantal, berichtenaantal en (indien het token
    de rechten heeft) insights + postprestaties op, en committeert die versleuteld.
-3. **`agent/`** — een **lokale Playwright-agent** op de PC van de eigenaar die elke
-   4 dagen de officiële Instagram data-export ("Download je informatie") aanvraagt,
+3. **`agent/`** — een **lokale Playwright-agent** op de PC van de eigenaar die
+   **alleen handmatig** (`npm run run`; geen geplande taak meer — start zonder
+   terminal doet niets tenzij `--manual`) de officiële Instagram data-export
+   ("Download je informatie") aanvraagt,
    ophaalt, met de vorige vergelijkt en de **namenlijsten** versleuteld naar GitHub
    pusht. Nodig omdat de Graph API geen namen van volgers geeft — alleen aantallen.
 
-De dagelijkse Action ziet je *dat* er iets veranderde; de agent ziet om de vier
-dagen *wie*. Sneller dan 1×/4 dagen staat Instagram niet toe.
+De dagelijkse Action ziet je *dat* er iets veranderde; de agent ziet *wie* (zodra
+de eigenaar hem draait). Sneller dan 1×/4 dagen staat Instagram niet toe.
 
 ## Deployment / "live zetten"
 

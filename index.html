@@ -1286,29 +1286,22 @@ function renderAgentBanner() {
   if (!el) return;
   if (!agentStatus) {
     el.className = 'agent-banner idle';
-    el.textContent = 'Automatische agent nog niet actief. Zie agent/README.md om hem in te richten, of upload hieronder handmatig een export.';
+    el.textContent = 'Agent nog niet gebruikt. Zie agent/README.md om hem in te richten en handmatig te starten, of upload hieronder een export.';
     return;
   }
-
-  const daysSinceRun = agentStatus.lastRunAt
-    ? Math.floor((Date.now() - Date.parse(agentStatus.lastRunAt)) / 86400000)
-    : null;
 
   if (!agentStatus.sessionValid) {
     el.className = 'agent-banner error';
     el.textContent = 'Instagram-sessie verlopen. Draai op je PC "npm run login" in de map agent/ om opnieuw in te loggen — tot die tijd worden de namen niet bijgewerkt.';
-  } else if (daysSinceRun !== null && daysSinceRun >= 3) {
-    el.className = 'agent-banner warn';
-    el.textContent = `Agent heeft ${daysSinceRun} dagen niet gedraaid. Stond je PC uit, of is de geplande taak gestopt?`;
   } else if (agentStatus.lastError) {
     el.className = 'agent-banner warn';
     el.textContent = 'Laatste agent-run gaf een fout: ' + agentStatus.lastError;
   } else if (agentStatus.phase === 'PENDING') {
     el.className = 'agent-banner idle';
-    el.textContent = 'Export aangevraagd bij Instagram, wachten tot hij klaarstaat. De agent haalt hem automatisch op zodra dat zo is.';
+    el.textContent = 'Export aangevraagd bij Instagram. Start de agent opnieuw (npm run run) zodra Instagram meldt dat hij klaarstaat.';
   } else {
     el.className = 'agent-banner ok';
-    el.textContent = `Agent draait. Laatste succesvolle export: ${agentStatus.lastSuccessDate || '—'}.`;
+    el.textContent = `Laatste succesvolle export: ${agentStatus.lastSuccessDate || '—'} (agent draait handmatig).`;
   }
 }
 
